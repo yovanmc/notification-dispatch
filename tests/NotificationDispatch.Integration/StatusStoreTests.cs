@@ -59,6 +59,7 @@ public class StatusStoreTests : IClassFixture<RedisFixture>
         Assert.NotNull(result);
         Assert.Equal(DeliveryState.Processing, result.State);
         Assert.Equal(1, result.Attempts);
+        Assert.Null(result.CompletedAt);
     }
 
     [Fact]
@@ -81,5 +82,6 @@ public class StatusStoreTests : IClassFixture<RedisFixture>
         Assert.Equal(DeliveryState.DeadLettered, result.State);
         Assert.Equal(3, result.Attempts);
         Assert.Equal("Connection refused", result.LastError);
+        Assert.NotNull(result.CompletedAt);
     }
 }

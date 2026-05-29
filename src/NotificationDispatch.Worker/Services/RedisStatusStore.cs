@@ -32,10 +32,12 @@ public class RedisStatusStore : IStatusStore
         return JsonSerializer.Deserialize<NotificationStatus>((string)json!);
     }
 
+    // Note: read-modify-write is non-atomic. Safe for the current single-consumer-per-job
+    // Worker design, but not safe for concurrent updates to the same jobId.
     public async Task UpdateStateAsync(string jobId, DeliveryState state, int attempts, string? lastError = null)
     {
         var existing = await GetAsync(jobId);
-        if (existing is null) return;
+        if (existing is null) throw new InvalidOperationException($"Cannot update state for job '{jobId}': status record not found.");
 
         var updated = existing with
         {
@@ -44,7 +46,7 @@ public class RedisStatusStore : IStatusStore
             LastError = lastError,
             CompletedAt = state is DeliveryState.Delivered or DeliveryState.DeadLettered
                 ? DateTimeOffset.UtcNow
-                : existing.CompletedAt
+                : null
         };
 
         await SetAsync(updated);
