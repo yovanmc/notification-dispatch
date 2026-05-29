@@ -86,7 +86,9 @@ public class RedisStreamProducer
     {
         var assembly = Assembly.GetExecutingAssembly();
         var resourceName = assembly.GetManifestResourceNames()
-            .First(n => n.EndsWith("enqueue.lua"));
+            .FirstOrDefault(n => n.EndsWith("enqueue.lua"))
+            ?? throw new InvalidOperationException(
+                "Embedded resource 'enqueue.lua' not found. Verify it is declared as EmbeddedResource in the .csproj.");
         using var stream = assembly.GetManifestResourceStream(resourceName)!;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();

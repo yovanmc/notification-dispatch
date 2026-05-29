@@ -65,9 +65,11 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
             Body = "{\"event\":\"test\"}"
         };
 
-        var (_, jobId1) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
-        var (_, jobId2) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
+        var (created1, jobId1) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
+        var (created2, jobId2) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
 
+        Assert.True(created1);
+        Assert.True(created2);
         Assert.NotEqual(jobId1, jobId2);
     }
 }
