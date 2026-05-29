@@ -42,10 +42,19 @@ public class NotificationWorkerService : BackgroundService
         await EnsureConsumerGroupAsync(db);
         await ReclaimPendingEntriesAsync(db, stoppingToken);
 
+        var lastReclaimAt = DateTimeOffset.UtcNow;
+        const int reclaimIntervalSeconds = 30;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                if ((DateTimeOffset.UtcNow - lastReclaimAt).TotalSeconds >= reclaimIntervalSeconds)
+                {
+                    await ReclaimPendingEntriesAsync(db, stoppingToken);
+                    lastReclaimAt = DateTimeOffset.UtcNow;
+                }
+
                 var entries = await db.StreamReadGroupAsync(
                     StreamKey, ConsumerGroup, _consumerId,
                     ">", count: 1);
