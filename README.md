@@ -94,6 +94,7 @@ Supported channels: `email`, `sms`, `webhook`.
 
 - `202` — new job accepted: `{"jobId":"<uuid>"}`
 - `200` — duplicate key, returns existing job: `{"jobId":"<uuid>","status":{...}}`
+- `400` — `Idempotency-Key` header missing or blank
 
 ---
 
@@ -110,11 +111,12 @@ Poll job status.
 
 ### GET /notifications/dlq?count=20
 
-List recently dead-lettered jobs. `count` max is 100.
+List recently dead-lettered jobs. `count` must be between 1 and 100 (default 20).
 
 **Response**
 
 - `200` — array of job objects
+- `400` — `count` out of range
 
 ---
 
@@ -125,6 +127,8 @@ Re-enqueue a dead-lettered job under a new job ID.
 **Response**
 
 - `202` — `{"originalJobId":"<uuid>","newJobId":"<uuid>"}`
+- `404` — no DLQ entry found for `jobId`
+- `422` — DLQ entry exists but payload field is missing (data corruption)
 
 ## Design Decisions
 
