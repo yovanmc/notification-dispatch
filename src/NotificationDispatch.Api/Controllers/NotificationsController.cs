@@ -58,16 +58,27 @@ public class NotificationsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetStatus(string id)
     {
-        var status = await _statusStore.GetAsync(id);
-        if (status is null)
-            return NotFound(new { error = $"Job {id} not found" });
+        try
+        {
+            var status = await _statusStore.GetAsync(id);
+            if (status is null)
+                return NotFound(new { error = $"Job {id} not found" });
 
-        return Ok(status);
+            return Ok(status);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retrieve status for job {JobId}", id);
+            return StatusCode(503, new { error = "Service temporarily unavailable" });
+        }
     }
 
     [HttpGet("dlq")]
     public async Task<IActionResult> GetDlq([FromQuery] int count = 20)
     {
+        if (count is < 1 or > 100)
+            return BadRequest(new { error = "count must be between 1 and 100" });
+
         var entries = await _dlq.GetRecentAsync(count);
         return Ok(entries);
     }
@@ -75,19 +86,30 @@ public class NotificationsController : ControllerBase
     [HttpPost("dlq/{jobId}/replay")]
     public async Task<IActionResult> ReplayDlq(string jobId)
     {
-        var dlqEntry = await _dlq.GetByJobIdAsync(jobId);
-        if (dlqEntry is null)
-            return NotFound(new { error = $"DLQ entry for job {jobId} not found" });
+        try
+        {
+            var dlqEntry = await _dlq.GetByJobIdAsync(jobId);
+            if (dlqEntry is null)
+                return NotFound(new { error = $"DLQ entry for job {jobId} not found" });
 
-        var originalJob = NotificationJob.FromJson(dlqEntry["payload"]);
-        var replayKey = $"replay-{jobId}-{DateTimeOffset.UtcNow.Ticks}";
+            if (!dlqEntry.TryGetValue("payload", out var payloadJson))
+                return UnprocessableEntity(new { error = "DLQ entry is missing payload field" });
 
-        var (_, newJobId) = await _producer.EnqueueAsync(originalJob.Request, replayKey);
+            var originalJob = NotificationJob.FromJson(payloadJson);
+            var replayKey = $"replay-{jobId}-{DateTimeOffset.UtcNow.Ticks}";
 
-        _logger.LogInformation("DLQ job {OriginalJobId} replayed as {NewJobId}",
-            jobId, newJobId);
+            var (_, newJobId) = await _producer.EnqueueAsync(originalJob.Request, replayKey);
 
-        return AcceptedAtAction(nameof(GetStatus), new { id = newJobId },
-            new { originalJobId = jobId, newJobId });
+            _logger.LogInformation("DLQ job {OriginalJobId} replayed as {NewJobId}",
+                jobId, newJobId);
+
+            return AcceptedAtAction(nameof(GetStatus), new { id = newJobId },
+                new { originalJobId = jobId, newJobId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to replay DLQ job {JobId}", jobId);
+            return StatusCode(503, new { error = "Service temporarily unavailable" });
+        }
     }
 }
