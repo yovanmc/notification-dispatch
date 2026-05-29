@@ -12,31 +12,29 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
-    var builder = Host.CreateDefaultBuilder(args)
-        .UseSerilog()
-        .ConfigureServices((context, services) =>
-        {
-            var redisConnection = context.Configuration.GetValue<string>("Redis:ConnectionString")
-                ?? "localhost:6379";
+    var builder = Host.CreateApplicationBuilder(args);
+    builder.Services.AddSerilog(Log.Logger);
 
-            services.AddSingleton<IConnectionMultiplexer>(
-                ConnectionMultiplexer.Connect(redisConnection));
+    var redisConnection = builder.Configuration.GetValue<string>("Redis:ConnectionString")
+        ?? "localhost:6379";
 
-            services.AddSingleton<RedisStatusStore>();
-            services.AddSingleton<DeadLetterStore>();
-            services.AddSingleton<RetryPolicy>();
+    builder.Services.AddSingleton<IConnectionMultiplexer>(
+        ConnectionMultiplexer.Connect(redisConnection));
 
-            services.AddSingleton<INotificationSender, EmailSender>();
-            services.AddSingleton<INotificationSender, SmsSender>();
-            services.AddHttpClient<WebhookSender>()
-                .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
-            services.AddSingleton<INotificationSender>(sp => sp.GetRequiredService<WebhookSender>());
+    builder.Services.AddSingleton<RedisStatusStore>();
+    builder.Services.AddSingleton<DeadLetterStore>();
+    builder.Services.AddSingleton<RetryPolicy>();
 
-            services.AddSingleton<SenderRouter>(sp =>
-                new SenderRouter(sp.GetServices<INotificationSender>()));
+    builder.Services.AddSingleton<INotificationSender, EmailSender>();
+    builder.Services.AddSingleton<INotificationSender, SmsSender>();
+    builder.Services.AddHttpClient<WebhookSender>()
+        .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+    builder.Services.AddSingleton<INotificationSender>(sp => sp.GetRequiredService<WebhookSender>());
 
-            services.AddHostedService<NotificationWorkerService>();
-        });
+    builder.Services.AddSingleton<SenderRouter>(sp =>
+        new SenderRouter(sp.GetServices<INotificationSender>()));
+
+    builder.Services.AddHostedService<NotificationWorkerService>();
 
     var host = builder.Build();
     await host.RunAsync();
