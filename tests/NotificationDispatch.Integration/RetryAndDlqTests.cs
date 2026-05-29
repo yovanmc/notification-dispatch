@@ -26,6 +26,17 @@ public class RetryAndDlqTests : IClassFixture<RedisFixture>
         Assert.Equal(expected, _retry.ShouldRetry(attempt));
     }
 
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 2)]
+    [InlineData(2, 4)]
+    [InlineData(3, 4)]  // clamped — same as index 2
+    [InlineData(10, 4)] // clamped — same as index 2
+    public void GetDelay_ReturnsCorrectBackoff(int attempt, int expectedSeconds)
+    {
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), _retry.GetDelay(attempt));
+    }
+
     [Fact]
     public async Task WriteAsync_ThenGetByJobIdAsync_ReturnsEntry()
     {

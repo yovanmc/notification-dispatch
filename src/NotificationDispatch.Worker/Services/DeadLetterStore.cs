@@ -27,7 +27,7 @@ public class DeadLetterStore
             new("finalFailureTime", finalFailureTime.ToString("O"))
         };
 
-        await db.StreamAddAsync(DlqStream, entry);
+        await db.StreamAddAsync(DlqStream, entry, maxLength: 10_000, useApproximateMaxLength: true);
     }
 
     public async Task<List<Dictionary<string, string>>> GetRecentAsync(int count = 20)
@@ -41,10 +41,11 @@ public class DeadLetterStore
         )).ToList();
     }
 
+    // Linear scan — acceptable for DLQ volumes. Returns the first (oldest) match.
     public async Task<Dictionary<string, string>?> GetByJobIdAsync(string jobId)
     {
         var db = _redis.GetDatabase();
-        var entries = await db.StreamRangeAsync(DlqStream);
+        var entries = await db.StreamRangeAsync(DlqStream, count: 10_000);
 
         var match = entries.FirstOrDefault(e =>
             e.Values.Any(v => v.Name == "jobId" && v.Value == jobId));
