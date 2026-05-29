@@ -7,6 +7,7 @@ const BASE_URL = __ENV.BASE_URL || 'http://localhost:5100';
 
 const successRate = new Rate('success_rate');
 const enqueueDuration = new Trend('enqueue_duration', true);
+const failedRequests = new Counter('failed_requests');
 
 export const options = {
     stages: [
@@ -43,8 +44,16 @@ export default function () {
 
     const passed = check(res, {
         'status is 202': (r) => r.status === 202,
-        'has jobId': (r) => JSON.parse(r.body).jobId !== undefined,
+        'has jobId': (r) => {
+            try { return JSON.parse(r.body)?.jobId !== undefined; }
+            catch { return false; }
+        },
     });
+
+    if (!passed) {
+        failedRequests.add(1);
+        console.error(`FAIL status=${res.status} body=${res.body?.slice(0, 200)}`);
+    }
 
     successRate.add(passed);
     sleep(0.1);
