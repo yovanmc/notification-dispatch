@@ -1,3 +1,4 @@
+using NotificationDispatch.Core;
 using NotificationDispatch.Core.Models;
 using StackExchange.Redis;
 
@@ -6,7 +7,7 @@ namespace NotificationDispatch.Worker.Services;
 public class DeadLetterStore
 {
     private readonly IConnectionMultiplexer _redis;
-    private const string DlqStream = "notifications:dlq";
+    private const string DlqStream = RedisConstants.DlqStreamKey;
 
     public DeadLetterStore(IConnectionMultiplexer redis)
     {

@@ -1,3 +1,4 @@
+using NotificationDispatch.Core;
 using NotificationDispatch.Core.Models;
 using StackExchange.Redis;
 
@@ -12,8 +13,8 @@ public class NotificationWorkerService : BackgroundService
     private readonly RetryPolicy _retryPolicy;
     private readonly ILogger<NotificationWorkerService> _logger;
 
-    private const string StreamKey = "notifications:jobs";
-    private const string ConsumerGroup = "worker-group";
+    private const string StreamKey = RedisConstants.JobStreamKey;
+    private const string ConsumerGroup = RedisConstants.ConsumerGroupName;
     private readonly string _consumerId = $"worker-{Environment.MachineName}-{Guid.NewGuid():N}";
 
     public NotificationWorkerService(
@@ -39,6 +40,7 @@ public class NotificationWorkerService : BackgroundService
             _consumerId, StreamKey);
 
         await EnsureConsumerGroupAsync(db);
+        await ReclaimPendingEntriesAsync(db, stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -97,6 +99,50 @@ public class NotificationWorkerService : BackgroundService
         catch (RedisServerException ex) when (ex.Message.StartsWith("BUSYGROUP"))
         {
             // Group already exists — normal on restart
+        }
+    }
+
+    // On startup, reclaim any entries that were mid-flight when a previous worker instance crashed.
+    // XAUTOCLAIM returns entries that have been pending longer than the idle threshold.
+    private async Task ReclaimPendingEntriesAsync(IDatabase db, CancellationToken stoppingToken)
+    {
+        const long claimIdleMs = 30_000; // 30s — well above max retry duration (~12s)
+        var startId = "0-0";
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var result = await db.StreamAutoClaimAsync(
+                StreamKey, ConsumerGroup, _consumerId,
+                minIdleTimeInMs: claimIdleMs,
+                startAtId: startId,
+                count: 10);
+
+            foreach (var entry in result.ClaimedEntries)
+            {
+                var payloadField = entry.Values.FirstOrDefault(v => v.Name == "payload");
+                if (payloadField.Name == default)
+                {
+                    await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
+                    continue;
+                }
+
+                NotificationJob job;
+                try { job = NotificationJob.FromJson(payloadField.Value.ToString()); }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Malformed payload in reclaimed entry {EntryId}, ACKing and skipping", entry.Id);
+                    await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
+                    continue;
+                }
+
+                _logger.LogWarning("Reclaiming stale job {JobId} (idle >{IdleMs}ms)", job.JobId, claimIdleMs);
+                await ProcessJobAsync(db, entry.Id, job, stoppingToken);
+            }
+
+            if (result.NextStartId == "0-0")
+                break;
+
+            startId = result.NextStartId;
         }
     }
 

@@ -22,6 +22,13 @@ public class WebhookSender : INotificationSender
 
     public async Task SendAsync(NotificationJob job, CancellationToken cancellationToken = default)
     {
+        if (!Uri.TryCreate(job.Request.Recipient, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https"))
+        {
+            throw new ArgumentException(
+                $"Recipient must be an absolute http/https URL: {job.Request.Recipient}");
+        }
+
         var payload = JsonSerializer.Serialize(new
         {
             jobId = job.JobId,
@@ -36,7 +43,8 @@ public class WebhookSender : INotificationSender
 
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var rawBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            var body = rawBody.Length > 500 ? rawBody[..500] + "…" : rawBody;
             throw new HttpRequestException(
                 $"Webhook to {job.Request.Recipient} returned {(int)response.StatusCode}: {body}",
                 null, response.StatusCode);

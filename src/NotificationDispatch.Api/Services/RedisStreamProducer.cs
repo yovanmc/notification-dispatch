@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using NotificationDispatch.Core;
 using NotificationDispatch.Core.Models;
 using StackExchange.Redis;
 
@@ -10,8 +11,8 @@ public class RedisStreamProducer
     private readonly IConnectionMultiplexer _redis;
     private readonly string _luaScript;
 
-    private const string StreamKey = "notifications:jobs";
-    private const string ConsumerGroup = "worker-group";
+    private const string StreamKey = RedisConstants.JobStreamKey;
+    private const string ConsumerGroup = RedisConstants.ConsumerGroupName;
     private const int IdempotencyTtlSeconds = 86400; // 24 hours
     private const int StatusTtlSeconds = 86400;
 

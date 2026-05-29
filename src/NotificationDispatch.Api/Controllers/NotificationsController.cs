@@ -34,6 +34,9 @@ public class NotificationsController : ControllerBase
         if (string.IsNullOrWhiteSpace(idempotencyKey))
             return BadRequest(new { error = "Idempotency-Key header is required" });
 
+        if (idempotencyKey.Length > 256)
+            return BadRequest(new { error = "Idempotency-Key must not exceed 256 characters" });
+
         try
         {
             var (created, jobId) = await _producer.EnqueueAsync(request, idempotencyKey);
