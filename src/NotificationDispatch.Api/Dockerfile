@@ -12,5 +12,7 @@ RUN dotnet publish src/NotificationDispatch.Api -c Release -o /app /p:ErrorOnDup
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app .
+ENV ASPNETCORE_HTTP_PORTS=8080
+USER app
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "NotificationDispatch.Api.dll"]
