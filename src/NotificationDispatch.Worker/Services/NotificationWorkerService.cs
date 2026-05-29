@@ -38,6 +38,8 @@ public class NotificationWorkerService : BackgroundService
         _logger.LogInformation("Worker {ConsumerId} starting on stream {Stream}",
             _consumerId, StreamKey);
 
+        await EnsureConsumerGroupAsync(db);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -54,7 +56,18 @@ public class NotificationWorkerService : BackgroundService
 
                 var entry = entries[0];
                 var payload = entry.Values.First(v => v.Name == "payload").Value.ToString();
-                var job = NotificationJob.FromJson(payload);
+
+                NotificationJob job;
+                try
+                {
+                    job = NotificationJob.FromJson(payload);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Malformed payload in stream entry {EntryId}, ACKing and skipping", entry.Id);
+                    await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
+                    continue;
+                }
 
                 _logger.LogInformation("Processing job {JobId} on channel {Channel}",
                     job.JobId, job.Request.Channel);
@@ -73,6 +86,18 @@ public class NotificationWorkerService : BackgroundService
         }
 
         _logger.LogInformation("Worker {ConsumerId} stopping", _consumerId);
+    }
+
+    private async Task EnsureConsumerGroupAsync(IDatabase db)
+    {
+        try
+        {
+            await db.StreamCreateConsumerGroupAsync(StreamKey, ConsumerGroup, "0", createStream: true);
+        }
+        catch (RedisServerException ex) when (ex.Message.StartsWith("BUSYGROUP"))
+        {
+            // Group already exists — normal on restart
+        }
     }
 
     private async Task ProcessJobAsync(IDatabase db, RedisValue entryId,
