@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <EmbeddedResource Include="Scripts/enqueue.lua" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\NotificationDispatch.Core\NotificationDispatch.Core.csproj" />
   </ItemGroup>
 
