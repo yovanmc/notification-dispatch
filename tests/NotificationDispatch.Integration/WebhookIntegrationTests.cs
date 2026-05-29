@@ -10,15 +10,18 @@ namespace NotificationDispatch.Integration;
 public class WebhookIntegrationTests : IAsyncLifetime
 {
     private WireMockServer _mockServer = null!;
+    private HttpClient _httpClient = null!;
 
     public ValueTask InitializeAsync()
     {
         _mockServer = WireMockServer.Start();
+        _httpClient = new HttpClient();
         return ValueTask.CompletedTask;
     }
 
     public ValueTask DisposeAsync()
     {
+        _httpClient.Dispose();
         _mockServer.Dispose();
         return ValueTask.CompletedTask;
     }
@@ -33,7 +36,7 @@ public class WebhookIntegrationTests : IAsyncLifetime
         );
 
         var sender = new WebhookSender(
-            new HttpClient(),
+            _httpClient,
             NullLogger<WebhookSender>.Instance);
 
         var job = new NotificationJob
@@ -48,9 +51,12 @@ public class WebhookIntegrationTests : IAsyncLifetime
             EnqueuedAt = DateTimeOffset.UtcNow
         };
 
-        await sender.SendAsync(job);
+        await sender.SendAsync(job, TestContext.Current.CancellationToken);
 
-        Assert.Single(_mockServer.LogEntries);
+        var entry = Assert.Single(_mockServer.LogEntries);
+        Assert.NotNull(entry.RequestMessage);
+        Assert.Equal("POST", entry.RequestMessage.Method);
+        Assert.Equal("/webhook", entry.RequestMessage.Path);
     }
 
     [Fact]
@@ -63,7 +69,7 @@ public class WebhookIntegrationTests : IAsyncLifetime
         );
 
         var sender = new WebhookSender(
-            new HttpClient(),
+            _httpClient,
             NullLogger<WebhookSender>.Instance);
 
         var job = new NotificationJob
@@ -78,6 +84,7 @@ public class WebhookIntegrationTests : IAsyncLifetime
             EnqueuedAt = DateTimeOffset.UtcNow
         };
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => sender.SendAsync(job));
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            sender.SendAsync(job, TestContext.Current.CancellationToken));
     }
 }

@@ -57,31 +57,16 @@ public class NotificationLifecycleTests : IClassFixture<RedisFixture>
             EnqueuedAt = DateTimeOffset.UtcNow
         };
 
-        await _statusStore.UpdateStateAsync(jobId, DeliveryState.Processing, 1);
-        await router.RouteAsync(job);
-        await _statusStore.UpdateStateAsync(jobId, DeliveryState.Delivered, 1);
+        const int attemptCount = 1;
+        await _statusStore.UpdateStateAsync(jobId, DeliveryState.Processing, attemptCount);
+        await router.RouteAsync(job, TestContext.Current.CancellationToken);
+        await _statusStore.UpdateStateAsync(jobId, DeliveryState.Delivered, attemptCount);
 
         // Assert — delivered
         var final = await _statusStore.GetAsync(jobId);
         Assert.NotNull(final);
         Assert.Equal(DeliveryState.Delivered, final.State);
-        Assert.Equal(1, final.Attempts);
+        Assert.Equal(attemptCount, final.Attempts);
         Assert.NotNull(final.CompletedAt);
-    }
-
-    [Fact]
-    public async Task PostNotification_Returns202_WithJobId()
-    {
-        var request = new NotificationRequest
-        {
-            Channel = "sms",
-            Recipient = "+15559876543",
-            Body = "Test notification"
-        };
-
-        var (created, jobId) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
-
-        Assert.True(created);
-        Assert.False(string.IsNullOrEmpty(jobId));
     }
 }

@@ -47,7 +47,7 @@ public class DlqReplayTests : IClassFixture<RedisFixture>
         Assert.NotNull(dlqEntry);
 
         var replayedJob = NotificationJob.FromJson(dlqEntry["payload"]);
-        var replayKey = $"replay-{originalJobId}-{DateTimeOffset.UtcNow.Ticks}";
+        var replayKey = $"replay-{Guid.NewGuid()}";
         var (replayCreated, replayJobId) = await _producer.EnqueueAsync(replayedJob.Request, replayKey);
 
         // Assert
