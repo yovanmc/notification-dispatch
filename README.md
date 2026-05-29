@@ -21,7 +21,7 @@ Client
              ▼
 ┌────────────────────────────────────────┐
 │  notifications:jobs (Redis Stream)     │
-│  consumer group: notification-workers  │
+│  consumer group: worker-group          │
 └────────────┬───────────────────────────┘
              │ XREADGROUP / XAUTOCLAIM (30s)
              ▼

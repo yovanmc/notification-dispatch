@@ -22,6 +22,11 @@ public class WebhookSender : INotificationSender
 
     public async Task SendAsync(NotificationJob job, CancellationToken cancellationToken = default)
     {
+        // Partial validation: ensures the recipient is an absolute http/https URI.
+        // This does NOT prevent SSRF — localhost, private IP ranges, link-local,
+        // and cloud metadata endpoints (e.g. 169.254.169.254) are still reachable.
+        // Full SSRF mitigation requires hostname resolution + IP range allowlist,
+        // which is out of scope for this service.
         if (!Uri.TryCreate(job.Request.Recipient, UriKind.Absolute, out var uri) ||
             uri.Scheme is not ("http" or "https"))
         {
