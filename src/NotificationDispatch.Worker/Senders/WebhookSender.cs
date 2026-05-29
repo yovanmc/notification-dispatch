@@ -33,7 +33,14 @@ public class WebhookSender : INotificationSender
 
         var content = new StringContent(payload, Encoding.UTF8, "application/json");
         var response = await _httpClient.PostAsync(job.Request.Recipient, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new HttpRequestException(
+                $"Webhook to {job.Request.Recipient} returned {(int)response.StatusCode}: {body}",
+                null, response.StatusCode);
+        }
 
         _logger.LogInformation(
             "Webhook delivered to {Url} for job {JobId}, status {StatusCode}",

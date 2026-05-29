@@ -19,7 +19,7 @@ public class SmsSender : INotificationSender
     public Task SendAsync(NotificationJob job, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
-            "SMS sent to {Recipient} for job {JobId}",
+            "[FAKE] SMS sent to {Recipient} for job {JobId}",
             job.Request.Recipient, job.JobId);
         return Task.CompletedTask;
     }
