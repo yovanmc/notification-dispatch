@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NotificationDispatch.Core\NotificationDispatch.Core.csproj" />
+    <ProjectReference Include="..\NotificationDispatch.Worker\NotificationDispatch.Worker.csproj" />
   </ItemGroup>
 
   <ItemGroup>

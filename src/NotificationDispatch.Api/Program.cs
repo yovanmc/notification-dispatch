@@ -1,34 +1,41 @@
-var builder = WebApplication.CreateBuilder(args);
+using NotificationDispatch.Api.Services;
+using NotificationDispatch.Worker.Services;
+using Serilog;
+using StackExchange.Redis;
 
-// Add services to the container.
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console(outputTemplate:
+        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .Enrich.FromLogContext()
+    .CreateLogger();
 
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-
-app.UseHttpsRedirection();
-
-var summaries = new[]
+try
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Host.UseSerilog();
 
-app.MapGet("/weatherforecast", () =>
+    var redisConnection = builder.Configuration.GetValue<string>("Redis:ConnectionString")
+        ?? "localhost:6379";
+
+    builder.Services.AddSingleton<IConnectionMultiplexer>(
+        ConnectionMultiplexer.Connect(redisConnection));
+
+    builder.Services.AddSingleton<RedisStreamProducer>();
+    builder.Services.AddSingleton<RedisStatusStore>();
+    builder.Services.AddSingleton<DeadLetterStore>();
+    builder.Services.AddControllers();
+
+    var app = builder.Build();
+    app.UseSerilogRequestLogging();
+    app.MapControllers();
+
+    app.Run();
+}
+catch (Exception ex)
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-});
-
-app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
+    Log.Fatal(ex, "Api terminated unexpectedly");
+}
+finally
 {
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    await Log.CloseAndFlushAsync();
 }
