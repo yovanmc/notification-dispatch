@@ -8,7 +8,6 @@ using NotificationDispatch.Infrastructure;
 using NotificationDispatch.Integration.Fixtures;
 using NotificationDispatch.Worker.Senders;
 using NotificationDispatch.Worker.Services;
-using StackExchange.Redis;
 using WireMock.RequestBuilders;
 using WireMock.ResponseBuilders;
 using WireMock.Server;
@@ -69,12 +68,11 @@ public class EndToEndTests : IClassFixture<AppFixture>
     private (NotificationWorkerService worker, CancellationTokenSource cts) StartWorker(
         params INotificationSender[] senders)
     {
-        var connection = ConnectionMultiplexer.Connect(_app.RedisConnectionString);
         var worker = new NotificationWorkerService(
-            connection,
+            _app.Multiplexer,
             new SenderRouter(senders),
-            new RedisStatusStore(connection),
-            new DeadLetterStore(connection),
+            new RedisStatusStore(_app.Multiplexer),
+            new DeadLetterStore(_app.Multiplexer),
             new RetryPolicy(),
             NullLogger<NotificationWorkerService>.Instance);
         var cts = new CancellationTokenSource();
@@ -87,6 +85,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task PostNotification_Returns202_AndJobIsQueued()
     {
+        await _app.FlushRedisAsync();
         var response = await PostNotificationAsync(new
         {
             channel = "email",
@@ -107,6 +106,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task EmailJob_ProcessedByWorker_ReachesDelivered()
     {
+        await _app.FlushRedisAsync();
         var response = await PostNotificationAsync(new
         {
             channel = "email",
@@ -133,6 +133,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task FailingWebhook_DeadLettersAfterRetries_AndWritesToDlq()
     {
+        await _app.FlushRedisAsync();
         using var mockServer = WireMockServer.Start();
         mockServer.Given(Request.Create().WithPath("/fail").UsingPost())
                   .RespondWith(Response.Create().WithStatusCode(500).WithBody("internal error"));
@@ -171,6 +172,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task DlqReplay_ViaApi_CreatesNewQueuedJob()
     {
+        await _app.FlushRedisAsync();
         // Arrange: dead-letter a webhook job
         using var mockServer = WireMockServer.Start();
         mockServer.Given(Request.Create().WithPath("/fail").UsingPost())
@@ -215,6 +217,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task DuplicateIdempotencyKey_ReturnsSameJobId_With200()
     {
+        await _app.FlushRedisAsync();
         var key = Guid.NewGuid().ToString();
         var body = new { channel = "email", recipient = "idem@example.com", body = "scenario 5" };
 
