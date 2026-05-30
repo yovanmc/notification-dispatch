@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using NotificationDispatch.Core.Interfaces;
-using NotificationDispatch.Core.Models;
 using NotificationDispatch.Infrastructure;
 using NotificationDispatch.Integration.Fixtures;
 using NotificationDispatch.Worker.Senders;
@@ -11,10 +10,6 @@ using NotificationDispatch.Worker.Services;
 using WireMock.RequestBuilders;
 using WireMock.ResponseBuilders;
 using WireMock.Server;
-
-// DeliveryState serializes as integer by default (no JsonStringEnumConverter on the API).
-// Helper constants to keep assertions readable.
-// Queued=0, Processing=1, Delivered=2, DeadLettered=3
 
 namespace NotificationDispatch.Integration;
 
@@ -46,8 +41,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
         return body.GetProperty("jobId").GetString()!;
     }
 
-    // State is serialized as integer: Queued=0, Processing=1, Delivered=2, DeadLettered=3
-    private async Task<JsonElement> WaitForStateAsync(string jobId, DeliveryState expectedState,
+    private async Task<JsonElement> WaitForStateAsync(string jobId, string expectedState,
         TimeSpan? timeout = null)
     {
         var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
@@ -57,7 +51,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
             if (response.IsSuccessStatusCode)
             {
                 var status = await response.Content.ReadFromJsonAsync<JsonElement>();
-                if (status.GetProperty("state").GetInt32() == (int)expectedState)
+                if (status.GetProperty("state").GetString() == expectedState)
                     return status;
             }
             await Task.Delay(200);
@@ -100,7 +94,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
         var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{jobId}");
         Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
         var status = await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal((int)DeliveryState.Queued, status.GetProperty("state").GetInt32());
+        Assert.Equal("Queued", status.GetProperty("state").GetString());
     }
 
     [Fact]
@@ -118,7 +112,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
         var (worker, cts) = StartWorker(new EmailSender(NullLogger<EmailSender>.Instance));
         try
         {
-            var status = await WaitForStateAsync(jobId, DeliveryState.Delivered);
+            var status = await WaitForStateAsync(jobId, "Delivered");
             Assert.Equal(1, status.GetProperty("attempts").GetInt32());
             Assert.True(status.TryGetProperty("completedAt", out var completedAt)
                 && completedAt.ValueKind != JsonValueKind.Null);
@@ -151,8 +145,8 @@ public class EndToEndTests : IClassFixture<AppFixture>
         try
         {
             // 3 retries × up to 4s each = ~12s worst case; give 25s
-            var status = await WaitForStateAsync(jobId, DeliveryState.DeadLettered, TimeSpan.FromSeconds(25));
-            Assert.Equal((int)DeliveryState.DeadLettered, status.GetProperty("state").GetInt32());
+            var status = await WaitForStateAsync(jobId, "DeadLettered", TimeSpan.FromSeconds(25));
+            Assert.Equal("DeadLettered", status.GetProperty("state").GetString());
         }
         finally
         {
@@ -190,7 +184,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
         var (worker, cts) = StartWorker(webhookSender);
         try
         {
-            await WaitForStateAsync(originalJobId, DeliveryState.DeadLettered, TimeSpan.FromSeconds(25));
+            await WaitForStateAsync(originalJobId, "DeadLettered", TimeSpan.FromSeconds(25));
         }
         finally
         {
@@ -211,7 +205,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
         var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{newJobId}");
         Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
         var status = await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal((int)DeliveryState.Queued, status.GetProperty("state").GetInt32());
+        Assert.Equal("Queued", status.GetProperty("state").GetString());
     }
 
     [Fact]
