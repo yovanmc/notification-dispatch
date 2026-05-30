@@ -66,7 +66,16 @@ public class NotificationWorkerService : BackgroundService
                 }
 
                 var entry = entries[0];
-                var payload = entry.Values.First(v => v.Name == "payload").Value.ToString();
+                var payload = ExtractPayload(entry.Values);
+                if (payload is null)
+                {
+                    _logger.LogError(
+                        "Stream entry {EntryId} is missing 'payload' field — writing to DLQ and ACKing",
+                        entry.Id);
+                    await WriteMalformedAndAckAsync(db, entry.Id, "(missing payload field)",
+                        "payload field absent", source: "live");
+                    continue;
+                }
 
                 NotificationJob job;
                 try
@@ -76,19 +85,7 @@ public class NotificationWorkerService : BackgroundService
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Malformed payload in stream entry {EntryId} — writing to DLQ and ACKing", entry.Id);
-                    try
-                    {
-                        await _dlq.WriteMalformedAsync(entry.Id.ToString(), payload, ex.Message, source: "live");
-                    }
-                    catch (Exception dlqEx)
-                    {
-                        _logger.LogWarning(dlqEx,
-                            "Failed to write malformed entry {EntryId} to DLQ — leaving in PEL for reclaim",
-                            entry.Id);
-                        // Do not ACK: leave entry in PEL so XAUTOCLAIM can reclaim it.
-                        continue;
-                    }
-                    await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
+                    await WriteMalformedAndAckAsync(db, entry.Id, payload, ex.Message, source: "live");
                     continue;
                 }
 
@@ -142,30 +139,23 @@ public class NotificationWorkerService : BackgroundService
 
             foreach (var entry in result.ClaimedEntries)
             {
-                var payloadField = entry.Values.FirstOrDefault(v => v.Name == "payload");
-                if (payloadField.Name == default)
+                var payload = ExtractPayload(entry.Values);
+                if (payload is null)
                 {
-                    await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
+                    _logger.LogError(
+                        "Reclaimed stream entry {EntryId} is missing 'payload' field — writing to DLQ and ACKing",
+                        entry.Id);
+                    await WriteMalformedAndAckAsync(db, entry.Id, "(missing payload field)",
+                        "payload field absent", source: "reclaimed");
                     continue;
                 }
 
                 NotificationJob job;
-                try { job = NotificationJob.FromJson(payloadField.Value.ToString()); }
+                try { job = NotificationJob.FromJson(payload); }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Malformed payload in reclaimed entry {EntryId} — writing to DLQ and ACKing", entry.Id);
-                    try
-                    {
-                        await _dlq.WriteMalformedAsync(entry.Id.ToString(), payloadField.Value.ToString(), ex.Message, source: "reclaimed");
-                    }
-                    catch (Exception dlqEx)
-                    {
-                        _logger.LogWarning(dlqEx,
-                            "Failed to write reclaimed malformed entry {EntryId} to DLQ — leaving in PEL",
-                            entry.Id);
-                        continue;
-                    }
-                    await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
+                    await WriteMalformedAndAckAsync(db, entry.Id, payload, ex.Message, source: "reclaimed");
                     continue;
                 }
 
@@ -178,6 +168,32 @@ public class NotificationWorkerService : BackgroundService
 
             startId = result.NextStartId;
         }
+    }
+
+    // Returns null when the 'payload' field is absent from the stream entry.
+    private static string? ExtractPayload(NameValueEntry[] values)
+    {
+        var field = values.FirstOrDefault(v => v.Name == "payload");
+        return field.Name == default ? null : field.Value.ToString();
+    }
+
+    // Writes a malformed entry to the DLQ and ACKs it. If the DLQ write fails, the entry is
+    // left in the PEL so XAUTOCLAIM can reclaim it on the next pass.
+    private async Task WriteMalformedAndAckAsync(IDatabase db, RedisValue entryId,
+        string rawPayload, string parseError, string source)
+    {
+        try
+        {
+            await _dlq.WriteMalformedAsync(entryId.ToString(), rawPayload, parseError, source);
+        }
+        catch (Exception dlqEx)
+        {
+            _logger.LogWarning(dlqEx,
+                "Failed to write malformed entry {EntryId} to DLQ — leaving in PEL for reclaim",
+                entryId);
+            return; // do not ACK: leave in PEL so XAUTOCLAIM retries
+        }
+        await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entryId);
     }
 
     private async Task ProcessJobAsync(IDatabase db, RedisValue entryId,

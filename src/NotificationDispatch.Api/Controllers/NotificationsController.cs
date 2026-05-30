@@ -48,6 +48,13 @@ public class NotificationsController : ControllerBase
         if (request.Body.Length > MaxBodyLength)
             return $"body must not exceed {MaxBodyLength} characters";
 
+        if (request.Channel.Equals("webhook", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Uri.TryCreate(request.Recipient, UriKind.Absolute, out var webhookUri)
+                || (webhookUri.Scheme != Uri.UriSchemeHttp && webhookUri.Scheme != Uri.UriSchemeHttps))
+                return "webhook recipient must be an absolute http or https URL";
+        }
+
         return null; // valid
     }
 

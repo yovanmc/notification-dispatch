@@ -1,5 +1,7 @@
 # Baseline Load Test Results
 
+> **Scope:** API enqueue baseline — measures `POST /notifications` submission throughput and latency only. Worker delivery, stream lag, and DLQ behaviour are not captured here.
+
 ## Test Summary
 
 **Date:** May 30, 2026  

@@ -82,10 +82,29 @@ public class RedisStreamProducer
 
     private static string ComputeRequestHash(NotificationRequest request)
     {
-        // Canonical form covers all user-supplied fields that define the intent of the request.
-        // Subject is nullable; use empty string to distinguish "no subject" from "empty subject".
-        var canonical = $"{request.Channel}:{request.Recipient}:{request.Subject ?? ""}:{request.Body}";
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        // Canonical JSON over all intent-defining fields.
+        // Using JSON (rather than a colon-joined string) avoids tuple-boundary collisions when
+        // user-supplied fields contain colons. Properties are in alphabetical order and
+        // Metadata keys are sorted so that insertion order does not affect the hash.
+        SortedDictionary<string, string>? sortedMetadata = null;
+        if (request.Metadata is not null)
+        {
+            sortedMetadata = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            foreach (var kv in request.Metadata)
+                sortedMetadata[kv.Key] = kv.Value;
+        }
+
+        var canonical = new
+        {
+            body     = request.Body,
+            channel  = request.Channel,
+            metadata = sortedMetadata,
+            recipient = request.Recipient,
+            subject  = request.Subject
+        };
+
+        var json = JsonSerializer.Serialize(canonical);
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(json));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 

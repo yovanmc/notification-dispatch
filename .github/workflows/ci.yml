@@ -34,3 +34,27 @@ jobs:
 
       - name: Build Docker images
         run: docker compose build
+
+  smoke:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start stack
+        run: docker compose up -d
+
+      - name: Wait for API to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:5100/health && echo " ✓ healthy" && break
+            echo "Waiting for API... ($i/30)"
+            sleep 3
+          done
+
+      - name: Run smoke test
+        run: ./scripts/smoke-test.sh
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down

@@ -114,6 +114,7 @@ Supported channels: `email`, `sms`, `webhook`.
 - `202` — new job accepted: `{"jobId":"<uuid>"}`
 - `200` — duplicate key, returns existing job: `{"jobId":"<uuid>","status":{...}}`
 - `400` — `Idempotency-Key` header missing, blank, or >256 chars; or invalid channel/recipient/body
+- `409` — `Idempotency-Key` reused with a different request body (conflict)
 
 ---
 
@@ -143,6 +144,8 @@ List recently dead-lettered jobs. `count` must be between 1 and 100 (default 20)
 
 Re-enqueue a dead-lettered job under a new job ID.
 
+Replay is idempotent within a 24-hour window — calling this endpoint twice for the same `jobId` returns the same `newJobId`. If the replayed job fails again and must be replayed a second time, wait for the 24-hour idempotency TTL to expire before calling this endpoint again (or the existing replay job is returned unchanged).
+
 **Response**
 
 - `202` — `{"originalJobId":"<uuid>","newJobId":"<uuid>"}`
@@ -155,7 +158,7 @@ Re-enqueue a dead-lettered job under a new job ID.
 
 **Lua script for idempotency** — The check-set-enqueue sequence runs atomically in a single round trip. Without a Lua script, a window between checking the key and writing the stream entry creates a TOCTOU race under concurrent duplicate submissions.
 
-**In-process retry with exponential backoff** — Three attempts (backoff 1s / 2s between attempts) happen inside the worker before a job is dead-lettered. This keeps failure handling co-located with the sender logic and avoids the complexity of a separate retry queue for a single-worker deployment.
+**In-process retry with exponential backoff** — Three attempts (backoff 1s / 2s between attempts) happen inside the worker before a job is dead-lettered. Retry counts are process-local: if the worker crashes mid-retry and the entry is reclaimed by another instance, attempts restart from 1. Total attempts before dead-lettering may therefore exceed 3 across reclaims. This keeps failure handling co-located with the sender logic and avoids the complexity of a separate retry queue for a single-worker deployment.
 
 **Fake email and SMS senders** — The scope of this service is demonstrating the dispatch architecture (routing, retry, idempotency, DLQ). Real SMTP or Twilio integration is a thin swap at the sender layer. Webhook delivery is real (HTTP POST) to show the pattern end-to-end.
 
@@ -173,7 +176,7 @@ Re-enqueue a dead-lettered job under a new job ID.
 
 **SSRF:** Webhook delivery accepts arbitrary `http://` or `https://` URLs. Loopback, private IP ranges, link-local, and cloud metadata endpoints (e.g. `169.254.169.254`) are reachable. **Do not expose this service publicly without an IP allowlist.** This is a local demo.
 
-**Stream retention:** The job stream is trimmed to approximately 10,000 entries (`MAXLEN ~ 10000`). Status records expire after 7 days.
+**Stream retention:** The job stream is unbounded — no `MAXLEN` trimming is applied, because trimming unprocessed or pending entries would silently discard work and undermine the durability guarantee. The DLQ stream is trimmed to approximately 10,000 entries. Status records expire after 7 days.
 
 ## Running Tests
 
@@ -204,4 +207,4 @@ docker compose up -d
 k6 run load-tests/ramp-up.js
 ```
 
-Results are written to `results/`.
+This is an **API enqueue baseline** — it measures `POST /notifications` submission throughput and latency, not end-to-end delivery or worker processing. Results in `results/` are committed manually after each run; the script writes a timestamped summary file via `handleSummary`.

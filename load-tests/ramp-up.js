@@ -2,6 +2,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { uuidv4 } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
+import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.2/index.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5100';
 
@@ -57,4 +58,16 @@ export default function () {
 
     successRate.add(passed);
     sleep(0.1);
+}
+
+// Write a timestamped summary file to results/ after each run.
+// This is an API enqueue baseline — it measures POST /notifications submission
+// throughput, not end-to-end delivery or worker processing.
+export function handleSummary(data) {
+    const timestamp = new Date().toISOString().replace(/:/g, '-').slice(0, 19);
+    const outPath = `results/run-${timestamp}.txt`;
+    return {
+        [outPath]: textSummary(data, { indent: '  ' }),
+        stdout: textSummary(data, { indent: '  ' }),
+    };
 }

@@ -102,4 +102,59 @@ public class IdempotencyTests
         Assert.Equal(EnqueueResult.Conflict, result2);
         Assert.Equal(jobId1, conflictJobId); // conflict returns the original job id, not a new one
     }
+
+    [Fact]
+    public async Task EnqueueAsync_SameKeyDifferentMetadata_ReturnsConflict()
+    {
+        await _redis.FlushAsync();
+
+        var idempotencyKey = Guid.NewGuid().ToString();
+        var request1 = new NotificationRequest
+        {
+            Channel = "email",
+            Recipient = "meta@example.com",
+            Body = "metadata conflict test",
+            Metadata = new Dictionary<string, string> { ["priority"] = "high" }
+        };
+        var request2 = request1 with
+        {
+            Metadata = new Dictionary<string, string> { ["priority"] = "low" }
+        };
+
+        var (result1, _) = await _producer.EnqueueAsync(request1, idempotencyKey);
+        var (result2, _) = await _producer.EnqueueAsync(request2, idempotencyKey);
+
+        Assert.Equal(EnqueueResult.Created, result1);
+        Assert.Equal(EnqueueResult.Conflict, result2);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_SameKeyMetadataDifferentInsertionOrder_ReturnsDuplicate()
+    {
+        await _redis.FlushAsync();
+
+        // Metadata with the same keys/values but different insertion order must hash identically.
+        var idempotencyKey = Guid.NewGuid().ToString();
+        var request1 = new NotificationRequest
+        {
+            Channel = "email",
+            Recipient = "meta@example.com",
+            Body = "metadata ordering test",
+            Metadata = new Dictionary<string, string> { ["z-key"] = "1", ["a-key"] = "2" }
+        };
+        var request2 = new NotificationRequest
+        {
+            Channel = "email",
+            Recipient = "meta@example.com",
+            Body = "metadata ordering test",
+            Metadata = new Dictionary<string, string> { ["a-key"] = "2", ["z-key"] = "1" }
+        };
+
+        var (result1, jobId1) = await _producer.EnqueueAsync(request1, idempotencyKey);
+        var (result2, jobId2) = await _producer.EnqueueAsync(request2, idempotencyKey);
+
+        Assert.Equal(EnqueueResult.Created, result1);
+        Assert.Equal(EnqueueResult.Duplicate, result2);
+        Assert.Equal(jobId1, jobId2);
+    }
 }

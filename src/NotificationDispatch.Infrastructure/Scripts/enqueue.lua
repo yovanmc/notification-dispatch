@@ -6,7 +6,7 @@
 -- ARGV[3] = initial status JSON
 -- ARGV[4] = idempotency TTL in seconds
 -- ARGV[5] = status TTL in seconds
--- ARGV[6] = request body hash (SHA256 hex of "channel:recipient:body")
+-- ARGV[6] = request intent hash (SHA256 hex of canonical JSON over all intent fields including metadata)
 --
 -- Returns:
 --   {0, existingJobId} if idempotency key exists with matching hash (duplicate — same request)
@@ -37,7 +37,7 @@ redis.call('SET', KEYS[1], ARGV[1] .. '|' .. ARGV[6], 'EX', ARGV[4])
 -- Write initial status
 redis.call('SET', KEYS[2], ARGV[3], 'EX', ARGV[5])
 
--- Enqueue to stream (trimmed to ~10,000 entries)
-redis.call('XADD', KEYS[3], 'MAXLEN', '~', '10000', '*', 'payload', ARGV[2])
+-- Enqueue to stream (unbounded — no MAXLEN; trimming unprocessed jobs would undermine durability)
+redis.call('XADD', KEYS[3], '*', 'payload', ARGV[2])
 
 return {1, ARGV[1]}
