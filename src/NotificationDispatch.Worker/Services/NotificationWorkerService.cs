@@ -75,7 +75,8 @@ public class NotificationWorkerService : BackgroundService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Malformed payload in stream entry {EntryId}, ACKing and skipping", entry.Id);
+                    _logger.LogError(ex, "Malformed payload in stream entry {EntryId} — writing to DLQ and ACKing", entry.Id);
+                    await _dlq.WriteMalformedAsync(entry.Id.ToString(), payload, ex.Message);
                     await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
                     continue;
                 }
@@ -141,7 +142,8 @@ public class NotificationWorkerService : BackgroundService
                 try { job = NotificationJob.FromJson(payloadField.Value.ToString()); }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Malformed payload in reclaimed entry {EntryId}, ACKing and skipping", entry.Id);
+                    _logger.LogError(ex, "Malformed payload in reclaimed entry {EntryId} — writing to DLQ and ACKing", entry.Id);
+                    await _dlq.WriteMalformedAsync(entry.Id.ToString(), payloadField.Value.ToString(), ex.Message);
                     await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
                     continue;
                 }
