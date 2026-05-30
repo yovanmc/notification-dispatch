@@ -25,7 +25,8 @@ public class EndToEndTests : IClassFixture<AppFixture>
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private async Task<HttpResponseMessage> PostNotificationAsync(object body, string? idempotencyKey = null)
+    private async Task<HttpResponseMessage> PostNotificationAsync(
+        object body, string? idempotencyKey = null, CancellationToken cancellationToken = default)
     {
         idempotencyKey ??= Guid.NewGuid().ToString();
         var request = new HttpRequestMessage(HttpMethod.Post, "/notifications")
@@ -33,29 +34,30 @@ public class EndToEndTests : IClassFixture<AppFixture>
             Content = JsonContent.Create(body)
         };
         request.Headers.Add("Idempotency-Key", idempotencyKey);
-        return await _app.ApiClient.SendAsync(request);
+        return await _app.ApiClient.SendAsync(request, cancellationToken);
     }
 
-    private async Task<string> GetJobIdAsync(HttpResponseMessage response)
+    private static async Task<string> GetJobIdAsync(
+        HttpResponseMessage response, CancellationToken cancellationToken = default)
     {
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
         return body.GetProperty("jobId").GetString()!;
     }
 
     private async Task<JsonElement> WaitForStateAsync(string jobId, string expectedState,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
         var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
         while (DateTimeOffset.UtcNow < deadline)
         {
-            var response = await _app.ApiClient.GetAsync($"/notifications/{jobId}");
+            var response = await _app.ApiClient.GetAsync($"/notifications/{jobId}", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var status = await response.Content.ReadFromJsonAsync<JsonElement>();
+                var status = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
                 if (status.GetProperty("state").GetString() == expectedState)
                     return status;
             }
-            await Task.Delay(200);
+            await Task.Delay(200, cancellationToken);
         }
         throw new TimeoutException($"Job {jobId} did not reach state '{expectedState}' within {timeout ?? TimeSpan.FromSeconds(10)}");
     }
@@ -80,40 +82,42 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task PostNotification_Returns202_AndJobIsQueued()
     {
+        var ct = TestContext.Current.CancellationToken;
         await _app.FlushRedisAsync();
         var response = await PostNotificationAsync(new
         {
             channel = "email",
             recipient = "e2e@example.com",
             body = "scenario 1"
-        });
+        }, cancellationToken: ct);
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        var jobId = await GetJobIdAsync(response);
+        var jobId = await GetJobIdAsync(response, ct);
         Assert.False(string.IsNullOrEmpty(jobId));
 
-        var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{jobId}");
+        var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{jobId}", ct);
         Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
-        var status = await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var status = await statusResponse.Content.ReadFromJsonAsync<JsonElement>(ct);
         Assert.Equal("Queued", status.GetProperty("state").GetString());
     }
 
     [Fact]
     public async Task EmailJob_ProcessedByWorker_ReachesDelivered()
     {
+        var ct = TestContext.Current.CancellationToken;
         await _app.FlushRedisAsync();
         var response = await PostNotificationAsync(new
         {
             channel = "email",
             recipient = "delivered@example.com",
             body = "scenario 2"
-        });
-        var jobId = await GetJobIdAsync(response);
+        }, cancellationToken: ct);
+        var jobId = await GetJobIdAsync(response, ct);
 
         var (worker, cts) = StartWorker(new EmailSender(NullLogger<EmailSender>.Instance));
         try
         {
-            var status = await WaitForStateAsync(jobId, "Delivered");
+            var status = await WaitForStateAsync(jobId, "Delivered", cancellationToken: ct);
             Assert.Equal(1, status.GetProperty("attempts").GetInt32());
             Assert.True(status.TryGetProperty("completedAt", out var completedAt)
                 && completedAt.ValueKind != JsonValueKind.Null);
@@ -128,6 +132,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task FailingWebhook_DeadLettersAfterRetries_AndWritesToDlq()
     {
+        var ct = TestContext.Current.CancellationToken;
         await _app.FlushRedisAsync();
         using var mockServer = WireMockServer.Start();
         mockServer.Given(Request.Create().WithPath("/fail").UsingPost())
@@ -138,15 +143,15 @@ public class EndToEndTests : IClassFixture<AppFixture>
             channel = "webhook",
             recipient = $"{mockServer.Url}/fail",
             body = "scenario 3"
-        });
-        var jobId = await GetJobIdAsync(response);
+        }, cancellationToken: ct);
+        var jobId = await GetJobIdAsync(response, ct);
 
         var webhookSender = new WebhookSender(new HttpClient(), NullLogger<WebhookSender>.Instance);
         var (worker, cts) = StartWorker(webhookSender);
         try
         {
             // 3 retries × up to 4s each = ~12s worst case; give 25s
-            var status = await WaitForStateAsync(jobId, "DeadLettered", TimeSpan.FromSeconds(25));
+            var status = await WaitForStateAsync(jobId, "DeadLettered", TimeSpan.FromSeconds(25), ct);
             Assert.Equal("DeadLettered", status.GetProperty("state").GetString());
         }
         finally
@@ -156,9 +161,9 @@ public class EndToEndTests : IClassFixture<AppFixture>
         }
 
         // DLQ entry should exist via the API
-        var dlqResponse = await _app.ApiClient.GetAsync("/notifications/dlq?count=50");
+        var dlqResponse = await _app.ApiClient.GetAsync("/notifications/dlq?count=50", ct);
         Assert.Equal(HttpStatusCode.OK, dlqResponse.StatusCode);
-        var entries = await dlqResponse.Content.ReadFromJsonAsync<JsonElement[]>();
+        var entries = await dlqResponse.Content.ReadFromJsonAsync<JsonElement[]>(ct);
         Assert.NotNull(entries);
         Assert.Contains(entries, e =>
             e.TryGetProperty("jobId", out var id) && id.GetString() == jobId);
@@ -167,6 +172,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task DlqReplay_ViaApi_CreatesNewQueuedJob()
     {
+        var ct = TestContext.Current.CancellationToken;
         await _app.FlushRedisAsync();
         // Arrange: dead-letter a webhook job
         using var mockServer = WireMockServer.Start();
@@ -178,14 +184,14 @@ public class EndToEndTests : IClassFixture<AppFixture>
             channel = "webhook",
             recipient = $"{mockServer.Url}/fail",
             body = "scenario 4"
-        });
-        var originalJobId = await GetJobIdAsync(response);
+        }, cancellationToken: ct);
+        var originalJobId = await GetJobIdAsync(response, ct);
 
         var webhookSender = new WebhookSender(new HttpClient(), NullLogger<WebhookSender>.Instance);
         var (worker, cts) = StartWorker(webhookSender);
         try
         {
-            await WaitForStateAsync(originalJobId, "DeadLettered", TimeSpan.FromSeconds(25));
+            await WaitForStateAsync(originalJobId, "DeadLettered", TimeSpan.FromSeconds(25), ct);
         }
         finally
         {
@@ -195,23 +201,24 @@ public class EndToEndTests : IClassFixture<AppFixture>
 
         // Act: call replay endpoint
         var replayResponse = await _app.ApiClient.PostAsync(
-            $"/notifications/dlq/{originalJobId}/replay", null);
+            $"/notifications/dlq/{originalJobId}/replay", null, ct);
 
         Assert.Equal(HttpStatusCode.Accepted, replayResponse.StatusCode);
-        var replayBody = await replayResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var replayBody = await replayResponse.Content.ReadFromJsonAsync<JsonElement>(ct);
         var newJobId = replayBody.GetProperty("newJobId").GetString()!;
         Assert.NotEqual(originalJobId, newJobId);
 
         // Assert: new job is Queued (not yet processed)
-        var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{newJobId}");
+        var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{newJobId}", ct);
         Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
-        var status = await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var status = await statusResponse.Content.ReadFromJsonAsync<JsonElement>(ct);
         Assert.Equal("Queued", status.GetProperty("state").GetString());
     }
 
     [Fact]
     public async Task EmailJob_OnceDelivered_SecondWorkerDoesNotReprocess()
     {
+        var ct = TestContext.Current.CancellationToken;
         await _app.FlushRedisAsync();
 
         var response = await PostNotificationAsync(new
@@ -219,14 +226,14 @@ public class EndToEndTests : IClassFixture<AppFixture>
             channel = "email",
             recipient = "guard@example.com",
             body = "terminal guard test"
-        });
-        var jobId = await GetJobIdAsync(response);
+        }, cancellationToken: ct);
+        var jobId = await GetJobIdAsync(response, ct);
 
         // First worker: process the job to Delivered and stop
         var (worker, cts) = StartWorker(new EmailSender(NullLogger<EmailSender>.Instance));
         try
         {
-            await WaitForStateAsync(jobId, "Delivered");
+            await WaitForStateAsync(jobId, "Delivered", cancellationToken: ct);
         }
         finally
         {
@@ -241,10 +248,10 @@ public class EndToEndTests : IClassFixture<AppFixture>
         var (worker2, cts2) = StartWorker(faulting);
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(2));
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
             Assert.False(faulting.WasCalled, "FaultingSender was invoked — job was reprocessed after Delivered");
-            var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{jobId}");
-            var status = await statusResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{jobId}", ct);
+            var status = await statusResponse.Content.ReadFromJsonAsync<JsonElement>(ct);
             Assert.Equal("Delivered", status.GetProperty("state").GetString());
         }
         finally
@@ -255,11 +262,18 @@ public class EndToEndTests : IClassFixture<AppFixture>
     }
 
     [Fact]
-    public async Task TerminalStateGuard_PendingEntryAlreadyDelivered_SkipsResendAndAcks()
+    public async Task TerminalStateGuard_UnconsumedEntryWithDeliveredStatus_SkipsResendAndAcks()
     {
-        // Exercises the actual guard code path: a stream entry is pending (never ACKed)
-        // but status already shows Delivered (simulating crash-after-send-before-ACK).
-        // The guard must prevent the sender from being invoked and must ACK the entry.
+        // Exercises the terminal-state guard: status is set to Delivered before the stream
+        // entry is consumed. When the worker reads the entry from ">", the guard detects
+        // Delivered status and ACKs without routing to any sender.
+        //
+        // This covers the same guard code path as crash-after-send-before-ACK (where the
+        // entry is in the PEL), but simulates it via a ">" entry with pre-set terminal status.
+        // The Docker Compose smoke test exercises end-to-end delivery including DLQ/replay;
+        // a true PEL/XAUTOCLAIM reclaim test would require coordinating consumer ownership
+        // and the 150s idle threshold, which is impractical in a unit/integration test.
+        var ct = TestContext.Current.CancellationToken;
         await _app.FlushRedisAsync();
 
         var response = await PostNotificationAsync(new
@@ -267,32 +281,31 @@ public class EndToEndTests : IClassFixture<AppFixture>
             channel = "email",
             recipient = "guard-reclaim@example.com",
             body = "terminal guard reclaim test"
-        });
-        var jobId = await GetJobIdAsync(response);
+        }, cancellationToken: ct);
+        var jobId = await GetJobIdAsync(response, ct);
 
         // Directly mark status Delivered without letting a worker ACK the stream entry.
-        // This mirrors: worker sent successfully, crashed before StreamAcknowledgeAsync.
         var statusStore = new RedisStatusStore(_app.Multiplexer);
         await statusStore.UpdateStateAsync(jobId, DeliveryState.Delivered, 1);
 
         // Start a worker that throws if the sender is ever called.
-        // The terminal-state guard should catch Delivered status and ACK without routing.
+        // The terminal-state guard should detect Delivered status and ACK without routing.
         var faulting = new FaultingSender();
         var (worker, cts) = StartWorker(faulting);
         try
         {
-            // Give the worker enough time to consume and ACK the pending stream entry.
-            await Task.Delay(TimeSpan.FromSeconds(3));
+            // Give the worker time to consume the stream entry and execute the guard.
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
 
             Assert.False(faulting.WasCalled,
                 "Terminal-state guard failed: sender was invoked on a job already in Delivered state");
 
-            // Stream entry must have been ACKed — a second worker started now should also see nothing.
+            // Stream entry must have been ACKed — a second worker sees nothing to process.
             var faulting2 = new FaultingSender();
             var (worker2, cts2) = StartWorker(faulting2);
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(1));
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
                 Assert.False(faulting2.WasCalled, "Stream entry was not ACKed by the terminal-state guard");
             }
             finally
@@ -311,17 +324,18 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task DuplicateIdempotencyKey_ReturnsSameJobId_With200()
     {
+        var ct = TestContext.Current.CancellationToken;
         await _app.FlushRedisAsync();
         var key = Guid.NewGuid().ToString();
         var body = new { channel = "email", recipient = "idem@example.com", body = "scenario 5" };
 
-        var first = await PostNotificationAsync(body, key);
+        var first = await PostNotificationAsync(body, key, ct);
         Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
-        var firstJobId = await GetJobIdAsync(first);
+        var firstJobId = await GetJobIdAsync(first, ct);
 
-        var second = await PostNotificationAsync(body, key);
+        var second = await PostNotificationAsync(body, key, ct);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-        var secondBody = await second.Content.ReadFromJsonAsync<JsonElement>();
+        var secondBody = await second.Content.ReadFromJsonAsync<JsonElement>(ct);
         var secondJobId = secondBody.GetProperty("jobId").GetString()!;
 
         Assert.Equal(firstJobId, secondJobId);
@@ -330,6 +344,7 @@ public class EndToEndTests : IClassFixture<AppFixture>
     [Fact]
     public async Task DlqReplay_CalledTwice_ReturnsSameNewJobId()
     {
+        var ct = TestContext.Current.CancellationToken;
         await _app.FlushRedisAsync();
 
         // Dead-letter a webhook job
@@ -342,14 +357,14 @@ public class EndToEndTests : IClassFixture<AppFixture>
             channel = "webhook",
             recipient = $"{mockServer.Url}/idem-fail",
             body = "replay-idempotency test"
-        });
-        var originalJobId = await GetJobIdAsync(response);
+        }, cancellationToken: ct);
+        var originalJobId = await GetJobIdAsync(response, ct);
 
         var webhookSender = new WebhookSender(new HttpClient(), NullLogger<WebhookSender>.Instance);
         var (worker, cts) = StartWorker(webhookSender);
         try
         {
-            await WaitForStateAsync(originalJobId, "DeadLettered", TimeSpan.FromSeconds(25));
+            await WaitForStateAsync(originalJobId, "DeadLettered", TimeSpan.FromSeconds(25), ct);
         }
         finally
         {
@@ -358,14 +373,14 @@ public class EndToEndTests : IClassFixture<AppFixture>
         }
 
         // Replay twice
-        var replay1 = await _app.ApiClient.PostAsync($"/notifications/dlq/{originalJobId}/replay", null);
-        var replay2 = await _app.ApiClient.PostAsync($"/notifications/dlq/{originalJobId}/replay", null);
+        var replay1 = await _app.ApiClient.PostAsync($"/notifications/dlq/{originalJobId}/replay", null, ct);
+        var replay2 = await _app.ApiClient.PostAsync($"/notifications/dlq/{originalJobId}/replay", null, ct);
 
         Assert.Equal(HttpStatusCode.Accepted, replay1.StatusCode);
         Assert.Equal(HttpStatusCode.Accepted, replay2.StatusCode);
 
-        var body1 = await replay1.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
-        var body2 = await replay2.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var body1 = await replay1.Content.ReadFromJsonAsync<JsonElement>(ct);
+        var body2 = await replay2.Content.ReadFromJsonAsync<JsonElement>(ct);
 
         var newJobId1 = body1.GetProperty("newJobId").GetString()!;
         var newJobId2 = body2.GetProperty("newJobId").GetString()!;

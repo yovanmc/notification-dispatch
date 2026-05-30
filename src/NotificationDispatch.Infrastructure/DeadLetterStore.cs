@@ -55,11 +55,13 @@ public class DeadLetterStore
         )).ToList();
     }
 
-    // Linear scan — acceptable for DLQ volumes. Returns the first (oldest) match.
+    // Linear scan newest-first — ensures recent DLQ entries are found even when the stream
+    // has slightly more than 10k entries (approximate MAXLEN can retain a few extras).
+    // Returns the most recent match when multiple DLQ records exist for the same job.
     public async Task<Dictionary<string, string>?> GetByJobIdAsync(string jobId)
     {
         var db = _redis.GetDatabase();
-        var entries = await db.StreamRangeAsync(DlqStream, count: 10_000);
+        var entries = await db.StreamRangeAsync(DlqStream, count: 10_000, messageOrder: Order.Descending);
 
         var match = entries.FirstOrDefault(e =>
             e.Values.Any(v => v.Name == "jobId" && v.Value == jobId));

@@ -127,8 +127,16 @@ public class NotificationsController : ControllerBase
         if (count is < 1 or > 100)
             return BadRequest(new { error = "count must be between 1 and 100" });
 
-        var entries = await _dlq.GetRecentAsync(count);
-        return Ok(entries);
+        try
+        {
+            var entries = await _dlq.GetRecentAsync(count);
+            return Ok(entries);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retrieve DLQ entries");
+            return StatusCode(503, new { error = "Service temporarily unavailable" });
+        }
     }
 
     [HttpPost("dlq/{jobId}/replay")]
@@ -148,10 +156,19 @@ public class NotificationsController : ControllerBase
             {
                 originalJob = NotificationJob.FromJson(payloadJson);
             }
-            catch (JsonException ex)
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
             {
+                // JsonException: malformed JSON. InvalidOperationException: valid JSON that
+                // deserializes to null (e.g. payload = "null"). Both are data corruption.
                 _logger.LogError(ex, "DLQ payload for job {JobId} could not be deserialized", jobId);
                 return UnprocessableEntity(new { error = "DLQ payload is corrupt and cannot be deserialized" });
+            }
+
+            var requestError = ValidateRequest(originalJob.Request);
+            if (requestError is not null)
+            {
+                _logger.LogError("DLQ payload for job {JobId} has invalid request fields: {Error}", jobId, requestError);
+                return UnprocessableEntity(new { error = $"DLQ payload has invalid request fields: {requestError}" });
             }
             // Deterministic replay key: replaying the same DLQ entry always returns the same new job
             // within the idempotency TTL window (24 hours). Use a fresh key to force replay after TTL.

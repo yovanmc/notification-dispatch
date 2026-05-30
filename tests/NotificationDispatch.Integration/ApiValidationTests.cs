@@ -57,4 +57,23 @@ public class ApiValidationTests : IClassFixture<AppFixture>
         var response = await PostAsync(new { channel = "email", recipient = "x@x.com", body = "hi" });
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
     }
+
+    [Theory]
+    [InlineData("not-a-url")]
+    [InlineData("/relative/path")]
+    [InlineData("ftp://example.com/hook")]
+    public async Task WebhookWithInvalidUrl_Returns400(string recipient)
+    {
+        await _app.FlushRedisAsync();
+        var response = await PostAsync(new { channel = "webhook", recipient, body = "{}" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WebhookWithValidHttpsUrl_Returns202()
+    {
+        await _app.FlushRedisAsync();
+        var response = await PostAsync(new { channel = "webhook", recipient = "https://example.com/hook", body = "{}" });
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+    }
 }
