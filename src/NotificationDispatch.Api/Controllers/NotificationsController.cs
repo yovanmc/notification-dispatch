@@ -137,7 +137,7 @@ public class NotificationsController : ControllerBase
 
             var originalJob = NotificationJob.FromJson(payloadJson);
             // Deterministic replay key: replaying the same DLQ entry always returns the same new job
-            // within the idempotency TTL window (7 days). Use a fresh key to force replay after TTL.
+            // within the idempotency TTL window (24 hours). Use a fresh key to force replay after TTL.
             var replayKey = $"replay:{jobId}";
 
             var (replayResult, newJobId) = await _producer.EnqueueAsync(originalJob.Request, replayKey);
@@ -146,6 +146,12 @@ public class NotificationsController : ControllerBase
             if (replayResult == EnqueueResult.Duplicate)
             {
                 _logger.LogInformation("DLQ job {OriginalJobId} already replayed as {NewJobId} (idempotent)",
+                    jobId, newJobId);
+            }
+            else if (replayResult == EnqueueResult.Conflict)
+            {
+                // Theoretically unreachable: replaying the exact original payload always hashes identically.
+                _logger.LogWarning("Unexpected conflict replaying DLQ job {OriginalJobId} as {NewJobId}",
                     jobId, newJobId);
             }
             else
