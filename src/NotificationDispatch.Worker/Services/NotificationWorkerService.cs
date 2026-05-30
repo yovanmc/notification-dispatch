@@ -76,7 +76,18 @@ public class NotificationWorkerService : BackgroundService
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Malformed payload in stream entry {EntryId} — writing to DLQ and ACKing", entry.Id);
-                    await _dlq.WriteMalformedAsync(entry.Id.ToString(), payload, ex.Message);
+                    try
+                    {
+                        await _dlq.WriteMalformedAsync(entry.Id.ToString(), payload, ex.Message, source: "live");
+                    }
+                    catch (Exception dlqEx)
+                    {
+                        _logger.LogWarning(dlqEx,
+                            "Failed to write malformed entry {EntryId} to DLQ — leaving in PEL for reclaim",
+                            entry.Id);
+                        // Do not ACK: leave entry in PEL so XAUTOCLAIM can reclaim it.
+                        continue;
+                    }
                     await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
                     continue;
                 }
@@ -143,7 +154,17 @@ public class NotificationWorkerService : BackgroundService
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Malformed payload in reclaimed entry {EntryId} — writing to DLQ and ACKing", entry.Id);
-                    await _dlq.WriteMalformedAsync(entry.Id.ToString(), payloadField.Value.ToString(), ex.Message);
+                    try
+                    {
+                        await _dlq.WriteMalformedAsync(entry.Id.ToString(), payloadField.Value.ToString(), ex.Message, source: "reclaimed");
+                    }
+                    catch (Exception dlqEx)
+                    {
+                        _logger.LogWarning(dlqEx,
+                            "Failed to write reclaimed malformed entry {EntryId} to DLQ — leaving in PEL",
+                            entry.Id);
+                        continue;
+                    }
                     await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entry.Id);
                     continue;
                 }

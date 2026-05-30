@@ -30,7 +30,7 @@ public class DeadLetterStore
         await db.StreamAddAsync(DlqStream, entry, maxLength: 10_000, useApproximateMaxLength: true);
     }
 
-    public async Task WriteMalformedAsync(string streamEntryId, string rawPayload, string parseError)
+    public async Task WriteMalformedAsync(string streamEntryId, string rawPayload, string parseError, string source = "live")
     {
         var db = _redis.GetDatabase();
         await db.StreamAddAsync(DlqStream, new NameValueEntry[]
@@ -39,6 +39,7 @@ public class DeadLetterStore
             new("rawPayload", rawPayload.Length > 1000 ? rawPayload[..1000] + "…" : rawPayload),
             new("parseError", parseError),
             new("timestamp", DateTimeOffset.UtcNow.ToString("O")),
+            new("source", source),
             new("type", "malformed")
         }, maxLength: 10_000, useApproximateMaxLength: true);
     }
