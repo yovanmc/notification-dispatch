@@ -40,10 +40,11 @@ public class RedisStatusStore : IStatusStore
 
         // If the status record expired (e.g., worker was down >7 days), reconstruct a minimal
         // record so the state transition can complete rather than throwing.
+        // Note: Channel is unknown because the original status record expired — this is lossy.
         var status = existing ?? new NotificationStatus
         {
             JobId = jobId,
-            Channel = "unknown",
+            Channel = "unknown", // lossy fallback — original channel not recoverable
             State = DeliveryState.Processing,
             Attempts = 0
         };

@@ -99,6 +99,7 @@ public class StatusStoreTests : IClassFixture<RedisFixture>
         Assert.NotNull(result);
         Assert.Equal(DeliveryState.Delivered, result.State);
         Assert.Equal(1, result.Attempts);
+        Assert.Equal("unknown", result.Channel); // upsert fallback sets Channel = "unknown"
         Assert.NotNull(result.CompletedAt);
     }
 }
