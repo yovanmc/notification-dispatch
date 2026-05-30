@@ -23,7 +23,7 @@ Client
 │  notifications:jobs (Redis Stream)     │
 │  consumer group: worker-group          │
 └────────────┬───────────────────────────┘
-             │ XREADGROUP / XAUTOCLAIM (150s idle)
+             │ XREADGROUP / XAUTOCLAIM (30s idle)
              ▼
 ┌─────────────────────────────────────────────────┐
 │  NotificationDispatch.Worker                    │
@@ -142,7 +142,7 @@ Re-enqueue a dead-lettered job under a new job ID.
 
 **Lua script for idempotency** — The check-set-enqueue sequence runs atomically in a single round trip. Without a Lua script, a window between checking the key and writing the stream entry creates a TOCTOU race under concurrent duplicate submissions.
 
-**In-process retry with exponential backoff** — Three attempts (backoff 1s / 2s / 4s) happen inside the worker before a job is dead-lettered. This keeps failure handling co-located with the sender logic and avoids the complexity of a separate retry queue for a single-worker deployment.
+**In-process retry with exponential backoff** — Three attempts (backoff 1s / 2s between attempts) happen inside the worker before a job is dead-lettered. This keeps failure handling co-located with the sender logic and avoids the complexity of a separate retry queue for a single-worker deployment.
 
 **Fake email and SMS senders** — The scope of this service is demonstrating the dispatch architecture (routing, retry, idempotency, DLQ). Real SMTP or Twilio integration is a thin swap at the sender layer. Webhook delivery is real (HTTP POST) to show the pattern end-to-end.
 
@@ -151,7 +151,7 @@ Re-enqueue a dead-lettered job under a new job ID.
 | Failure | Behaviour |
 |---|---|
 | Redis down | API returns `503`; Worker halts stream polling and logs errors; status store unavailable |
-| Worker crash mid-processing | `XAUTOCLAIM` reclaims the pending entry after 150 s; **at-least-once** — if crash occurs after send but before ACK, the webhook may fire again |
+| Worker crash mid-processing | `XAUTOCLAIM` reclaims the pending entry after 30 s; **at-least-once** — if crash occurs after send but before ACK, the webhook may fire again |
 | Webhook target down | Retried 3 times with exponential backoff, then dead-lettered; recoverable via `/dlq/{jobId}/replay` |
 
 ## Limitations
@@ -160,7 +160,7 @@ Re-enqueue a dead-lettered job under a new job ID.
 
 **SSRF:** Webhook delivery accepts arbitrary `http://` or `https://` URLs. Loopback, private IP ranges, link-local, and cloud metadata endpoints (e.g. `169.254.169.254`) are reachable. **Do not expose this service publicly without an IP allowlist.** This is a local demo.
 
-**Stream retention:** The job stream is trimmed to approximately 10,000 entries. Status records expire after 7 days.
+**Stream retention:** The job stream has no retention policy — ACKed entries remain indefinitely. Status records expire after 24 hours. Both will be addressed in a future change.
 
 ## Running Tests
 
