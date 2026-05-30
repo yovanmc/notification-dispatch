@@ -44,7 +44,13 @@ public class WebhookSender : INotificationSender
         });
 
         var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        var response = await _httpClient.PostAsync(job.Request.Recipient, content, cancellationToken);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, job.Request.Recipient)
+        {
+            Content = content
+        };
+        // Downstream idempotency hint — lets the webhook target deduplicate at-least-once redeliveries.
+        httpRequest.Headers.TryAddWithoutValidation("X-Idempotency-Key", job.JobId);
+        var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {

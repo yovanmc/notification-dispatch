@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using NotificationDispatch.Core.Interfaces;
+using NotificationDispatch.Core.Models;
 using NotificationDispatch.Infrastructure;
 using NotificationDispatch.Integration.Fixtures;
 using NotificationDispatch.Worker.Senders;
@@ -209,6 +210,51 @@ public class EndToEndTests : IClassFixture<AppFixture>
     }
 
     [Fact]
+    public async Task EmailJob_OnceDelivered_SecondWorkerDoesNotReprocess()
+    {
+        await _app.FlushRedisAsync();
+
+        var response = await PostNotificationAsync(new
+        {
+            channel = "email",
+            recipient = "guard@example.com",
+            body = "terminal guard test"
+        });
+        var jobId = await GetJobIdAsync(response);
+
+        // First worker: process the job to Delivered and stop
+        var (worker, cts) = StartWorker(new EmailSender(NullLogger<EmailSender>.Instance));
+        try
+        {
+            await WaitForStateAsync(jobId, "Delivered");
+        }
+        finally
+        {
+            cts.Cancel();
+            await worker.StopAsync(CancellationToken.None);
+        }
+
+        // Second worker with a sender that throws if called:
+        // the job is Delivered+ACKed, so the stream entry is gone and
+        // the terminal-state guard would also prevent any re-send.
+        var faulting = new FaultingSender();
+        var (worker2, cts2) = StartWorker(faulting);
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Assert.False(faulting.WasCalled, "FaultingSender was invoked — job was reprocessed after Delivered");
+            var statusResponse = await _app.ApiClient.GetAsync($"/notifications/{jobId}");
+            var status = await statusResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            Assert.Equal("Delivered", status.GetProperty("state").GetString());
+        }
+        finally
+        {
+            cts2.Cancel();
+            await worker2.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task DuplicateIdempotencyKey_ReturnsSameJobId_With200()
     {
         await _app.FlushRedisAsync();
@@ -225,5 +271,16 @@ public class EndToEndTests : IClassFixture<AppFixture>
         var secondJobId = secondBody.GetProperty("jobId").GetString()!;
 
         Assert.Equal(firstJobId, secondJobId);
+    }
+
+    private sealed class FaultingSender : INotificationSender
+    {
+        public bool WasCalled { get; private set; }
+        public bool CanHandle(string channel) => true;
+        public Task SendAsync(NotificationJob job, CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            throw new InvalidOperationException("FaultingSender: should not be called on terminal jobs");
+        }
     }
 }

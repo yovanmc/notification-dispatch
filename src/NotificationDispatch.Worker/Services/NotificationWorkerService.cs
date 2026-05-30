@@ -115,7 +115,9 @@ public class NotificationWorkerService : BackgroundService
     // XAUTOCLAIM returns entries that have been pending longer than the idle threshold.
     private async Task ReclaimPendingEntriesAsync(IDatabase db, CancellationToken stoppingToken)
     {
-        const long claimIdleMs = 30_000; // 30s — well above max retry duration (~12s)
+        // Worst-case processing window: 30s HTTP timeout × 3 attempts + 1s + 2s backoff + Redis writes + buffer.
+        // 150s ensures a legitimately in-flight webhook is never reclaimed and re-sent concurrently.
+        const long claimIdleMs = 150_000;
         var startId = "0-0";
 
         while (!stoppingToken.IsCancellationRequested)
@@ -158,6 +160,18 @@ public class NotificationWorkerService : BackgroundService
     private async Task ProcessJobAsync(IDatabase db, RedisValue entryId,
         NotificationJob job, CancellationToken stoppingToken)
     {
+        // Guard: if this job already reached a terminal state (e.g., worker crashed after
+        // delivery but before ACK, and the entry was reclaimed), skip re-sending.
+        var currentStatus = await _statusStore.GetAsync(job.JobId);
+        if (currentStatus?.State is DeliveryState.Delivered or DeliveryState.DeadLettered)
+        {
+            _logger.LogInformation(
+                "Job {JobId} already in terminal state {State} — ACKing without re-sending",
+                job.JobId, currentStatus.State);
+            await db.StreamAcknowledgeAsync(StreamKey, ConsumerGroup, entryId);
+            return;
+        }
+
         DateTimeOffset? firstFailureTime = null;
         string? lastError = null;
 

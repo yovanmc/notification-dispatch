@@ -23,7 +23,7 @@ Client
 │  notifications:jobs (Redis Stream)     │
 │  consumer group: worker-group          │
 └────────────┬───────────────────────────┘
-             │ XREADGROUP / XAUTOCLAIM (30s idle)
+             │ XREADGROUP / XAUTOCLAIM (150s idle)
              ▼
 ┌─────────────────────────────────────────────────┐
 │  NotificationDispatch.Worker                    │
@@ -151,7 +151,7 @@ Re-enqueue a dead-lettered job under a new job ID.
 | Failure | Behaviour |
 |---|---|
 | Redis down | API returns `503`; Worker halts stream polling and logs errors; status store unavailable |
-| Worker crash mid-processing | `XAUTOCLAIM` reclaims the pending entry after 30 s; **at-least-once** — if crash occurs after send but before ACK, the webhook may fire again |
+| Worker crash mid-processing | `XAUTOCLAIM` reclaims the pending entry after 150 s; **at-least-once** — if crash occurs after send but before ACK, the webhook may fire again |
 | Webhook target down | Retried 3 times with exponential backoff, then dead-lettered; recoverable via `/dlq/{jobId}/replay` |
 
 ## Limitations
