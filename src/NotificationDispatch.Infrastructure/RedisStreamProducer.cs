@@ -82,8 +82,9 @@ public class RedisStreamProducer
 
     private static string ComputeRequestHash(NotificationRequest request)
     {
-        // Canonical form: channel:recipient:body (metadata excluded for simplicity)
-        var canonical = $"{request.Channel}:{request.Recipient}:{request.Body}";
+        // Canonical form covers all user-supplied fields that define the intent of the request.
+        // Subject is nullable; use empty string to distinguish "no subject" from "empty subject".
+        var canonical = $"{request.Channel}:{request.Recipient}:{request.Subject ?? ""}:{request.Body}";
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }

@@ -15,8 +15,13 @@
 
 local existing = redis.call('GET', KEYS[1])
 if existing then
-    -- Format: "jobId|hash"
+    -- Format: "jobId|hash" (written by current version)
+    -- Legacy records (written before hash support) contain only "jobId" with no "|".
+    -- Treat legacy records as conflicts so they are not silently reused.
     local sep = string.find(existing, '|', 1, true)
+    if sep == nil then
+        return {2, existing}
+    end
     local existingJobId = string.sub(existing, 1, sep - 1)
     local existingHash  = string.sub(existing, sep + 1)
     if existingHash == ARGV[6] then

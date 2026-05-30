@@ -36,7 +36,7 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
     }
 
     [Fact]
-    public async Task EnqueueAsync_DuplicateKey_ReturnsSameJobIdAndCreatedFalse()
+    public async Task EnqueueAsync_DuplicateKey_ReturnsSameJobIdAndDuplicateResult()
     {
         var idempotencyKey = Guid.NewGuid().ToString();
         var request = new NotificationRequest
@@ -84,10 +84,11 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
         };
         var request2 = request1 with { Body = "Different body" };
 
-        var (result1, _) = await _producer.EnqueueAsync(request1, idempotencyKey);
-        var (result2, _) = await _producer.EnqueueAsync(request2, idempotencyKey);
+        var (result1, jobId1) = await _producer.EnqueueAsync(request1, idempotencyKey);
+        var (result2, conflictJobId) = await _producer.EnqueueAsync(request2, idempotencyKey);
 
         Assert.Equal(EnqueueResult.Created, result1);
         Assert.Equal(EnqueueResult.Conflict, result2);
+        Assert.Equal(jobId1, conflictJobId); // conflict returns the original job id, not a new one
     }
 }
