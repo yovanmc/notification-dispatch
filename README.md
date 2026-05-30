@@ -100,7 +100,7 @@ Supported channels: `email`, `sms`, `webhook`.
 
 - `202` — new job accepted: `{"jobId":"<uuid>"}`
 - `200` — duplicate key, returns existing job: `{"jobId":"<uuid>","status":{...}}`
-- `400` — `Idempotency-Key` header missing or blank
+- `400` — `Idempotency-Key` header missing, blank, or >256 chars; or invalid channel/recipient/body
 
 ---
 

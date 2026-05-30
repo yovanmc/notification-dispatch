@@ -25,6 +25,32 @@ public class NotificationsController : ControllerBase
         _logger = logger;
     }
 
+    private static readonly HashSet<string> ValidChannels =
+        new(StringComparer.OrdinalIgnoreCase) { "email", "sms", "webhook" };
+
+    private const int MaxBodyLength = 10_000;
+    private const int MaxRecipientLength = 1_000;
+
+    private static string? ValidateRequest(NotificationRequest request)
+    {
+        if (!ValidChannels.Contains(request.Channel))
+            return $"channel must be one of: email, sms, webhook. Got: '{request.Channel}'";
+
+        if (string.IsNullOrWhiteSpace(request.Recipient))
+            return "recipient is required";
+
+        if (request.Recipient.Length > MaxRecipientLength)
+            return $"recipient must not exceed {MaxRecipientLength} characters";
+
+        if (string.IsNullOrWhiteSpace(request.Body))
+            return "body is required";
+
+        if (request.Body.Length > MaxBodyLength)
+            return $"body must not exceed {MaxBodyLength} characters";
+
+        return null; // valid
+    }
+
     [HttpPost]
     public async Task<IActionResult> Send(
         [FromBody] NotificationRequest request,
@@ -35,6 +61,10 @@ public class NotificationsController : ControllerBase
 
         if (idempotencyKey.Length > 256)
             return BadRequest(new { error = "Idempotency-Key must not exceed 256 characters" });
+
+        var validationError = ValidateRequest(request);
+        if (validationError is not null)
+            return BadRequest(new { error = validationError });
 
         try
         {
