@@ -25,9 +25,9 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
             Body = "Hello"
         };
 
-        var (created, jobId) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
+        var (result, jobId) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
 
-        Assert.True(created);
+        Assert.Equal(EnqueueResult.Created, result);
         Assert.False(string.IsNullOrEmpty(jobId));
 
         var status = await _statusStore.GetAsync(jobId);
@@ -46,11 +46,11 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
             Body = "Duplicate test"
         };
 
-        var (created1, jobId1) = await _producer.EnqueueAsync(request, idempotencyKey);
-        var (created2, jobId2) = await _producer.EnqueueAsync(request, idempotencyKey);
+        var (result1, jobId1) = await _producer.EnqueueAsync(request, idempotencyKey);
+        var (result2, jobId2) = await _producer.EnqueueAsync(request, idempotencyKey);
 
-        Assert.True(created1);
-        Assert.False(created2);
+        Assert.Equal(EnqueueResult.Created, result1);
+        Assert.Equal(EnqueueResult.Duplicate, result2);
         Assert.Equal(jobId1, jobId2);
     }
 
@@ -64,11 +64,30 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
             Body = "{\"event\":\"test\"}"
         };
 
-        var (created1, jobId1) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
-        var (created2, jobId2) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
+        var (result1, jobId1) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
+        var (result2, jobId2) = await _producer.EnqueueAsync(request, Guid.NewGuid().ToString());
 
-        Assert.True(created1);
-        Assert.True(created2);
+        Assert.Equal(EnqueueResult.Created, result1);
+        Assert.Equal(EnqueueResult.Created, result2);
         Assert.NotEqual(jobId1, jobId2);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_SameKeyDifferentBody_ReturnsConflict()
+    {
+        var idempotencyKey = Guid.NewGuid().ToString();
+        var request1 = new NotificationRequest
+        {
+            Channel = "email",
+            Recipient = "test@example.com",
+            Body = "Original body"
+        };
+        var request2 = request1 with { Body = "Different body" };
+
+        var (result1, _) = await _producer.EnqueueAsync(request1, idempotencyKey);
+        var (result2, _) = await _producer.EnqueueAsync(request2, idempotencyKey);
+
+        Assert.Equal(EnqueueResult.Created, result1);
+        Assert.Equal(EnqueueResult.Conflict, result2);
     }
 }

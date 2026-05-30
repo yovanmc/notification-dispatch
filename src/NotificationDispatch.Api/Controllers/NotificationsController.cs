@@ -68,9 +68,17 @@ public class NotificationsController : ControllerBase
 
         try
         {
-            var (created, jobId) = await _producer.EnqueueAsync(request, idempotencyKey);
+            var (result, jobId) = await _producer.EnqueueAsync(request, idempotencyKey);
 
-            if (!created)
+            if (result == EnqueueResult.Conflict)
+            {
+                _logger.LogWarning(
+                    "Idempotency key conflict: key '{Key}' reused with different request body",
+                    idempotencyKey);
+                return Conflict(new { error = "Idempotency-Key was already used with a different request body" });
+            }
+
+            if (result == EnqueueResult.Duplicate)
             {
                 var existingStatus = await _statusStore.GetAsync(jobId);
                 _logger.LogInformation("Duplicate request with idempotency key, returning existing job {JobId}", jobId);

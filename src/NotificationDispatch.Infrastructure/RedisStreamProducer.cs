@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using NotificationDispatch.Core.Models;
 using StackExchange.Redis;
@@ -13,7 +15,7 @@ public class RedisStreamProducer
     private const string StreamKey = RedisConstants.JobStreamKey;
     private const string ConsumerGroup = RedisConstants.ConsumerGroupName;
     private const int IdempotencyTtlSeconds = 86400; // 24 hours
-    private const int StatusTtlSeconds = 604800; // 7 days
+    private const int StatusTtlSeconds = 604800; // 7 days — passed to enqueue.lua for initial status write
 
     public RedisStreamProducer(IConnectionMultiplexer redis)
     {
@@ -22,7 +24,7 @@ public class RedisStreamProducer
         EnsureConsumerGroup();
     }
 
-    public async Task<(bool Created, string JobId)> EnqueueAsync(
+    public async Task<(EnqueueResult Result, string JobId)> EnqueueAsync(
         NotificationRequest request, string idempotencyKey)
     {
         var db = _redis.GetDatabase();
@@ -43,6 +45,8 @@ public class RedisStreamProducer
             Attempts = 0
         };
 
+        var requestHash = ComputeRequestHash(request);
+
         var keys = new RedisKey[]
         {
             $"notification:idempotency:{idempotencyKey}",
@@ -56,17 +60,32 @@ public class RedisStreamProducer
             job.ToJson(),
             JsonSerializer.Serialize(initialStatus),
             IdempotencyTtlSeconds,
-            StatusTtlSeconds
+            StatusTtlSeconds,
+            requestHash
         };
 
         var result = (RedisResult[]?)await db.ScriptEvaluateAsync(_luaScript, keys, args);
         if (result is null)
             throw new InvalidOperationException("Lua script returned null");
 
-        var created = (long)result[0] == 1;
+        var code = (long)result[0];
         var returnedJobId = (string)result[1]!;
 
-        return (created, returnedJobId);
+        return code switch
+        {
+            0 => (EnqueueResult.Duplicate, returnedJobId),
+            1 => (EnqueueResult.Created, returnedJobId),
+            2 => (EnqueueResult.Conflict, returnedJobId),
+            _ => throw new InvalidOperationException($"Unexpected Lua result code: {code}")
+        };
+    }
+
+    private static string ComputeRequestHash(NotificationRequest request)
+    {
+        // Canonical form: channel:recipient:body (metadata excluded for simplicity)
+        var canonical = $"{request.Channel}:{request.Recipient}:{request.Body}";
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     private void EnsureConsumerGroup()
