@@ -1,3 +1,5 @@
+[![CI](https://github.com/yovanmc/notification-dispatch/actions/workflows/ci.yml/badge.svg)](https://github.com/yovanmc/notification-dispatch/actions/workflows/ci.yml)
+
 # notification-dispatch
 
 A production-patterned notification dispatch service demonstrating durable job queuing via Redis Streams, idempotent submission, and multi-channel routing with automatic retry and dead-lettering.
