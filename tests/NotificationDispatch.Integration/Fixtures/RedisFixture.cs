@@ -34,7 +34,7 @@ public class RedisFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
-        Connection.Dispose();
+        Connection?.Dispose();
         await _container.DisposeAsync();
     }
 }

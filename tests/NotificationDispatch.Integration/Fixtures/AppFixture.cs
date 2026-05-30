@@ -49,7 +49,7 @@ public class AppFixture : IAsyncLifetime
     {
         ApiClient.Dispose();
         await _factory.DisposeAsync();
-        Multiplexer.Dispose();
+        Multiplexer?.Dispose();
         await _redis.DisposeAsync();
     }
 }
