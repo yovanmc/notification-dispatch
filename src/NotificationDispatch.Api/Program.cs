@@ -1,34 +1,54 @@
-var builder = WebApplication.CreateBuilder(args);
+using NotificationDispatch.Infrastructure;
+using Serilog;
+using StackExchange.Redis;
 
-// Add services to the container.
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console(outputTemplate:
+        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .Enrich.FromLogContext()
+    .CreateLogger();
 
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-
-app.UseHttpsRedirection();
-
-var summaries = new[]
+try
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Host.UseSerilog();
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-});
+    var redisConnection = builder.Configuration.GetValue<string>("Redis:ConnectionString")
+        ?? "localhost:6379";
 
-app.Run();
+    builder.Services.AddSingleton<IConnectionMultiplexer>(
+        ConnectionMultiplexer.Connect(redisConnection));
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    builder.Services.AddSingleton<RedisStreamProducer>();
+    builder.Services.AddSingleton<RedisStatusStore>();
+    builder.Services.AddSingleton<DeadLetterStore>();
+    builder.Services.AddControllers()
+        .AddJsonOptions(o =>
+            o.JsonSerializerOptions.Converters.Add(
+                new System.Text.Json.Serialization.JsonStringEnumConverter()));
+
+    var app = builder.Build();
+    app.UseSerilogRequestLogging();
+    app.MapControllers();
+
+    app.MapGet("/health", (IConnectionMultiplexer redis) =>
+    {
+        var connected = redis.IsConnected;
+        return connected
+            ? Results.Ok(new { status = "healthy", redis = "connected" })
+            : Results.Json(new { status = "degraded", redis = "disconnected" }, statusCode: 503);
+    });
+
+    app.Run();
 }
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Api terminated unexpectedly");
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
+}
+
+// Required for WebApplicationFactory<Program> in integration tests
+public partial class Program { }

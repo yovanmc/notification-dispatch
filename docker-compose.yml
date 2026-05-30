@@ -1,0 +1,38 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: src/NotificationDispatch.Api/Dockerfile
+    ports:
+      - "5100:8080"
+    environment:
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    build:
+      context: .
+      dockerfile: src/NotificationDispatch.Worker/Dockerfile
+    environment:
+      - Redis__ConnectionString=redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy

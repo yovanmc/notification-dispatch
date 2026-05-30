@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/NotificationDispatch.Api/NotificationDispatch.Api.csproj" />
     <Project Path="src/NotificationDispatch.Core/NotificationDispatch.Core.csproj" />
+    <Project Path="src/NotificationDispatch.Infrastructure/NotificationDispatch.Infrastructure.csproj" />
     <Project Path="src/NotificationDispatch.Worker/NotificationDispatch.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">

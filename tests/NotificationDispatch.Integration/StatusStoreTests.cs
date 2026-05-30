@@ -1,0 +1,118 @@
+using NotificationDispatch.Core.Models;
+using NotificationDispatch.Infrastructure;
+using NotificationDispatch.Integration.Fixtures;
+
+namespace NotificationDispatch.Integration;
+
+[Collection("Integration")]
+public class StatusStoreTests
+{
+    private readonly RedisFixture _redis;
+    private readonly RedisStatusStore _store;
+
+    public StatusStoreTests(RedisFixture redis)
+    {
+        _redis = redis;
+        _store = new RedisStatusStore(redis.Connection);
+    }
+
+    [Fact]
+    public async Task SetAsync_ThenGetAsync_ReturnsStoredStatus()
+    {
+        await _redis.FlushAsync();
+
+        var status = new NotificationStatus
+        {
+            JobId = Guid.NewGuid().ToString(),
+            Channel = "email",
+            State = DeliveryState.Queued,
+            Attempts = 0
+        };
+
+        await _store.SetAsync(status);
+        var result = await _store.GetAsync(status.JobId);
+
+        Assert.NotNull(result);
+        Assert.Equal(status.JobId, result.JobId);
+        Assert.Equal(DeliveryState.Queued, result.State);
+        Assert.Equal("email", result.Channel);
+    }
+
+    [Fact]
+    public async Task GetAsync_NonExistent_ReturnsNull()
+    {
+        await _redis.FlushAsync();
+
+        var result = await _store.GetAsync("does-not-exist");
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task UpdateStateAsync_ChangesStateAndAttempts()
+    {
+        await _redis.FlushAsync();
+
+        var jobId = Guid.NewGuid().ToString();
+        var status = new NotificationStatus
+        {
+            JobId = jobId,
+            Channel = "sms",
+            State = DeliveryState.Queued,
+            Attempts = 0
+        };
+
+        await _store.SetAsync(status);
+        await _store.UpdateStateAsync(jobId, DeliveryState.Processing, 1);
+
+        var result = await _store.GetAsync(jobId);
+        Assert.NotNull(result);
+        Assert.Equal(DeliveryState.Processing, result.State);
+        Assert.Equal(1, result.Attempts);
+        Assert.Null(result.CompletedAt);
+    }
+
+    [Fact]
+    public async Task UpdateStateAsync_WithError_StoresError()
+    {
+        await _redis.FlushAsync();
+
+        var jobId = Guid.NewGuid().ToString();
+        var status = new NotificationStatus
+        {
+            JobId = jobId,
+            Channel = "webhook",
+            State = DeliveryState.Queued,
+            Attempts = 0
+        };
+
+        await _store.SetAsync(status);
+        await _store.UpdateStateAsync(jobId, DeliveryState.DeadLettered, 3, "Connection refused");
+
+        var result = await _store.GetAsync(jobId);
+        Assert.NotNull(result);
+        Assert.Equal(DeliveryState.DeadLettered, result.State);
+        Assert.Equal(3, result.Attempts);
+        Assert.Equal("Connection refused", result.LastError);
+        Assert.NotNull(result.CompletedAt);
+    }
+
+    [Fact]
+    public async Task UpdateStateAsync_WhenStatusMissing_UpsertsMissingRecord()
+    {
+        await _redis.FlushAsync();
+
+        // Simulate the case where the status record expired but the stream entry still exists:
+        // the worker calls UpdateStateAsync on a jobId with no prior status record.
+        var jobId = Guid.NewGuid().ToString();
+
+        // Do NOT call SetAsync first — status is intentionally absent
+        await _store.UpdateStateAsync(jobId, DeliveryState.Delivered, 1);
+
+        var result = await _store.GetAsync(jobId);
+        Assert.NotNull(result);
+        Assert.Equal(DeliveryState.Delivered, result.State);
+        Assert.Equal(1, result.Attempts);
+        Assert.Equal("unknown", result.Channel); // upsert fallback sets Channel = "unknown"
+        Assert.NotNull(result.CompletedAt);
+    }
+}

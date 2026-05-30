@@ -2,12 +2,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NotificationDispatch.Core\NotificationDispatch.Core.csproj" />
+    <ProjectReference Include="..\NotificationDispatch.Infrastructure\NotificationDispatch.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
-    <PackageReference Include="StackExchange.Redis" Version="2.13.17" />
   </ItemGroup>
 
   <PropertyGroup>

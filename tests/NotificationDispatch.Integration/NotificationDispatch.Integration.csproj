@@ -13,8 +13,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Testcontainers.Redis" Version="4.12.0" />
     <PackageReference Include="WireMock.Net" Version="2.7.0" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NotificationDispatch.Api\NotificationDispatch.Api.csproj" />
+    <ProjectReference Include="..\..\src\NotificationDispatch.Infrastructure\NotificationDispatch.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\NotificationDispatch.Worker\NotificationDispatch.Worker.csproj" />
     <ProjectReference Include="..\..\src\NotificationDispatch.Core\NotificationDispatch.Core.csproj" />
   </ItemGroup>
