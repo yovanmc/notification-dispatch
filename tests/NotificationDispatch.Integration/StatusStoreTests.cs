@@ -4,18 +4,23 @@ using NotificationDispatch.Integration.Fixtures;
 
 namespace NotificationDispatch.Integration;
 
-public class StatusStoreTests : IClassFixture<RedisFixture>
+[Collection("Integration")]
+public class StatusStoreTests
 {
+    private readonly RedisFixture _redis;
     private readonly RedisStatusStore _store;
 
     public StatusStoreTests(RedisFixture redis)
     {
+        _redis = redis;
         _store = new RedisStatusStore(redis.Connection);
     }
 
     [Fact]
     public async Task SetAsync_ThenGetAsync_ReturnsStoredStatus()
     {
+        await _redis.FlushAsync();
+
         var status = new NotificationStatus
         {
             JobId = Guid.NewGuid().ToString(),
@@ -36,6 +41,8 @@ public class StatusStoreTests : IClassFixture<RedisFixture>
     [Fact]
     public async Task GetAsync_NonExistent_ReturnsNull()
     {
+        await _redis.FlushAsync();
+
         var result = await _store.GetAsync("does-not-exist");
         Assert.Null(result);
     }
@@ -43,6 +50,8 @@ public class StatusStoreTests : IClassFixture<RedisFixture>
     [Fact]
     public async Task UpdateStateAsync_ChangesStateAndAttempts()
     {
+        await _redis.FlushAsync();
+
         var jobId = Guid.NewGuid().ToString();
         var status = new NotificationStatus
         {
@@ -65,6 +74,8 @@ public class StatusStoreTests : IClassFixture<RedisFixture>
     [Fact]
     public async Task UpdateStateAsync_WithError_StoresError()
     {
+        await _redis.FlushAsync();
+
         var jobId = Guid.NewGuid().ToString();
         var status = new NotificationStatus
         {
@@ -88,6 +99,8 @@ public class StatusStoreTests : IClassFixture<RedisFixture>
     [Fact]
     public async Task UpdateStateAsync_WhenStatusMissing_UpsertsMissingRecord()
     {
+        await _redis.FlushAsync();
+
         // Simulate the case where the status record expired but the stream entry still exists:
         // the worker calls UpdateStateAsync on a jobId with no prior status record.
         var jobId = Guid.NewGuid().ToString();

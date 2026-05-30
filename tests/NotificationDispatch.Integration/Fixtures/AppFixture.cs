@@ -18,9 +18,17 @@ public class AppFixture : IAsyncLifetime
         _redis = new RedisBuilder("redis:7-alpine").Build();
         await _redis.StartAsync();
         RedisConnectionString = _redis.GetConnectionString();
-        var options = ConfigurationOptions.Parse(RedisConnectionString);
-        options.AllowAdmin = true;
-        Multiplexer = await ConnectionMultiplexer.ConnectAsync(options);
+        try
+        {
+            var options = ConfigurationOptions.Parse(RedisConnectionString);
+            options.AllowAdmin = true;
+            Multiplexer = await ConnectionMultiplexer.ConnectAsync(options);
+        }
+        catch
+        {
+            await _redis.DisposeAsync();
+            throw;
+        }
 
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b =>

@@ -4,13 +4,16 @@ using NotificationDispatch.Integration.Fixtures;
 
 namespace NotificationDispatch.Integration;
 
-public class IdempotencyTests : IClassFixture<RedisFixture>
+[Collection("Integration")]
+public class IdempotencyTests
 {
+    private readonly RedisFixture _redis;
     private readonly RedisStreamProducer _producer;
     private readonly RedisStatusStore _statusStore;
 
     public IdempotencyTests(RedisFixture redis)
     {
+        _redis = redis;
         _producer = new RedisStreamProducer(redis.Connection);
         _statusStore = new RedisStatusStore(redis.Connection);
     }
@@ -18,6 +21,8 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
     [Fact]
     public async Task EnqueueAsync_FirstCall_CreatesJobAndReturnsCreatedTrue()
     {
+        await _redis.FlushAsync();
+
         var request = new NotificationRequest
         {
             Channel = "email",
@@ -38,6 +43,8 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
     [Fact]
     public async Task EnqueueAsync_DuplicateKey_ReturnsSameJobIdAndDuplicateResult()
     {
+        await _redis.FlushAsync();
+
         var idempotencyKey = Guid.NewGuid().ToString();
         var request = new NotificationRequest
         {
@@ -57,6 +64,8 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
     [Fact]
     public async Task EnqueueAsync_DifferentKeys_CreatesDifferentJobs()
     {
+        await _redis.FlushAsync();
+
         var request = new NotificationRequest
         {
             Channel = "webhook",
@@ -75,6 +84,8 @@ public class IdempotencyTests : IClassFixture<RedisFixture>
     [Fact]
     public async Task EnqueueAsync_SameKeyDifferentBody_ReturnsConflict()
     {
+        await _redis.FlushAsync();
+
         var idempotencyKey = Guid.NewGuid().ToString();
         var request1 = new NotificationRequest
         {
