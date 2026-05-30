@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NotificationDispatch.Api\NotificationDispatch.Api.csproj" />
+    <ProjectReference Include="..\..\src\NotificationDispatch.Infrastructure\NotificationDispatch.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\NotificationDispatch.Worker\NotificationDispatch.Worker.csproj" />
     <ProjectReference Include="..\..\src\NotificationDispatch.Core\NotificationDispatch.Core.csproj" />
   </ItemGroup>

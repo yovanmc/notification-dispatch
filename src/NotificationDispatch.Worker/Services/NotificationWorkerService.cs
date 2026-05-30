@@ -1,5 +1,5 @@
-using NotificationDispatch.Core;
 using NotificationDispatch.Core.Models;
+using NotificationDispatch.Infrastructure;
 using StackExchange.Redis;
 
 namespace NotificationDispatch.Worker.Services;

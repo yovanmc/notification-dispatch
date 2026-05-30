@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using NotificationDispatch.Api.Services;
 using NotificationDispatch.Core.Models;
-using NotificationDispatch.Worker.Services;
+using NotificationDispatch.Infrastructure;
 
 namespace NotificationDispatch.Api.Controllers;
 

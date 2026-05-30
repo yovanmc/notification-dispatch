@@ -1,6 +1,6 @@
 using NotificationDispatch.Core.Models;
+using NotificationDispatch.Infrastructure;
 using NotificationDispatch.Integration.Fixtures;
-using NotificationDispatch.Worker.Services;
 
 namespace NotificationDispatch.Integration;
 

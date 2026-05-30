@@ -17,5 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NotificationDispatch.Core\NotificationDispatch.Core.csproj" />
+    <ProjectReference Include="..\NotificationDispatch.Infrastructure\NotificationDispatch.Infrastructure.csproj" />
   </ItemGroup>
+
 </Project>

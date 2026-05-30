@@ -1,4 +1,5 @@
 using NotificationDispatch.Core.Interfaces;
+using NotificationDispatch.Infrastructure;
 using NotificationDispatch.Worker.Senders;
 using NotificationDispatch.Worker.Services;
 using Serilog;

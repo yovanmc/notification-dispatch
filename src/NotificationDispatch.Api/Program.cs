@@ -1,5 +1,4 @@
-using NotificationDispatch.Api.Services;
-using NotificationDispatch.Worker.Services;
+using NotificationDispatch.Infrastructure;
 using Serilog;
 using StackExchange.Redis;
 
@@ -39,3 +38,6 @@ finally
 {
     await Log.CloseAndFlushAsync();
 }
+
+// Required for WebApplicationFactory<Program> in integration tests
+public partial class Program { }
