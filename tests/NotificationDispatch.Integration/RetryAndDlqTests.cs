@@ -30,9 +30,9 @@ public class RetryAndDlqTests : IClassFixture<RedisFixture>
     [Theory]
     [InlineData(0, 1)]
     [InlineData(1, 2)]
-    [InlineData(2, 4)]
-    [InlineData(3, 4)]  // clamped — same as index 2
-    [InlineData(10, 4)] // clamped — same as index 2
+    [InlineData(2, 2)] // clamped to last delay (2s) — 4s is never used with MaxAttempts=3
+    [InlineData(3, 2)] // clamped
+    [InlineData(10, 2)] // clamped
     public void GetDelay_ReturnsCorrectBackoff(int attempt, int expectedSeconds)
     {
         Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), _retry.GetDelay(attempt));

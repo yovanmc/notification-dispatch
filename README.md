@@ -34,7 +34,7 @@ Client
 │    └─ WebhookSender (real HTTP POST)            │
 │                                                 │
 │  Retry: attempt 1 → 1s → attempt 2 → 2s →      │
-│         attempt 3 → 4s → XACK + DLQ            │
+│         attempt 3 → XACK + DLQ                  │
 └────────┬────────────────────┬───────────────────┘
          │                    │
          ▼                    ▼
@@ -43,6 +43,12 @@ notification:status:{jobId}  notifications:dlq
 ```
 
 **Shared models** (`NotificationDispatch.Core`): `NotificationRequest`, `NotificationJob`, `NotificationStatus`, `DeliveryState`.
+
+## Prerequisites
+
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- [Docker](https://docs.docker.com/get-docker/) + Docker Compose (for integration tests and local stack)
+- [k6](https://k6.io/docs/get-started/installation/) (optional — only for load tests)
 
 ## Quick Start
 
@@ -132,7 +138,7 @@ Re-enqueue a dead-lettered job under a new job ID.
 
 ## Design Decisions
 
-**Redis Streams over in-memory queue** — Streams are durable and survive worker restarts. Consumer groups allow multiple worker instances to process jobs concurrently without duplicates. `XAUTOCLAIM` reclaims stalled entries if a worker crashes mid-job.
+**Redis Streams over in-memory queue** — Streams are durable and survive worker restarts. Consumer groups allow multiple worker instances to process jobs concurrently. Delivery is **at-least-once**: if a worker crashes after sending but before ACKing, `XAUTOCLAIM` will redeliver the entry. Callers should treat webhook endpoints as idempotent; the worker forwards `X-Idempotency-Key: {jobId}` on every attempt to help downstream systems deduplicate. `XAUTOCLAIM` reclaims stalled entries if a worker crashes mid-job.
 
 **Lua script for idempotency** — The check-set-enqueue sequence runs atomically in a single round trip. Without a Lua script, a window between checking the key and writing the stream entry creates a TOCTOU race under concurrent duplicate submissions.
 
@@ -145,8 +151,16 @@ Re-enqueue a dead-lettered job under a new job ID.
 | Failure | Behaviour |
 |---|---|
 | Redis down | API returns `503`; Worker halts stream polling and logs errors; status store unavailable |
-| Worker crash mid-processing | `XAUTOCLAIM` reclaims the pending entry after 30 s; no message loss |
+| Worker crash mid-processing | `XAUTOCLAIM` reclaims the pending entry after 120 s; **at-least-once** — if crash occurs after send but before ACK, the webhook may fire again |
 | Webhook target down | Retried 3 times with exponential backoff, then dead-lettered; recoverable via `/dlq/{jobId}/replay` |
+
+## Limitations
+
+**Delivery semantics:** At-least-once. A job can be sent more than once if the worker crashes after delivery but before the stream ACK. Webhook endpoints should be idempotent. Email and SMS channels are logged stubs; real SMTP/Twilio delivery would inherit the same at-least-once guarantee.
+
+**SSRF:** Webhook delivery accepts arbitrary `http://` or `https://` URLs. Loopback, private IP ranges, link-local, and cloud metadata endpoints (e.g. `169.254.169.254`) are reachable. **Do not expose this service publicly without an IP allowlist.** This is a local demo.
+
+**Stream retention:** The job stream is trimmed to approximately 10,000 entries. Status records expire after 7 days.
 
 ## Running Tests
 
