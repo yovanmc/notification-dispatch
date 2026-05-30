@@ -50,7 +50,7 @@ public class WebhookSender : INotificationSender
         };
         // Downstream idempotency hint — lets the webhook target deduplicate at-least-once redeliveries.
         httpRequest.Headers.TryAddWithoutValidation("X-Idempotency-Key", job.JobId);
-        var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+        using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {

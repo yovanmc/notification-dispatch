@@ -166,8 +166,10 @@ Replay is idempotent within a 24-hour window — calling this endpoint twice for
 
 | Failure | Behaviour |
 |---|---|
-| Redis down | API returns `503`; Worker halts stream polling and logs errors; status store unavailable |
+| Redis unavailable at startup | Both API and Worker fail to start (`ConnectionMultiplexer.Connect` throws synchronously); no requests are served and no `503` is returned |
+| Redis lost at runtime | API returns `503` on each request; Worker logs errors on each poll iteration; status store operations fail until Redis reconnects |
 | Worker crash mid-processing | `XAUTOCLAIM` reclaims the pending entry after 150 s; **at-least-once** — if crash occurs after send but before ACK, the webhook may fire again |
+| Worker crash after DLQ write, before ACK | Entry is reclaimed and dead-lettered again; **at-least-once DLQ semantics** — duplicate DLQ records are possible under crash windows |
 | Webhook target down | Retried 3 times with exponential backoff, then dead-lettered; recoverable via `/dlq/{jobId}/replay` |
 
 ## Limitations

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using NotificationDispatch.Core.Models;
 using NotificationDispatch.Infrastructure;
@@ -142,7 +143,16 @@ public class NotificationsController : ControllerBase
             if (!dlqEntry.TryGetValue("payload", out var payloadJson))
                 return UnprocessableEntity(new { error = "DLQ entry is missing payload field" });
 
-            var originalJob = NotificationJob.FromJson(payloadJson);
+            NotificationJob originalJob;
+            try
+            {
+                originalJob = NotificationJob.FromJson(payloadJson);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "DLQ payload for job {JobId} could not be deserialized", jobId);
+                return UnprocessableEntity(new { error = "DLQ payload is corrupt and cannot be deserialized" });
+            }
             // Deterministic replay key: replaying the same DLQ entry always returns the same new job
             // within the idempotency TTL window (24 hours). Use a fresh key to force replay after TTL.
             var replayKey = $"replay:{jobId}";

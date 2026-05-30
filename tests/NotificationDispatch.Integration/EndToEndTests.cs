@@ -255,6 +255,60 @@ public class EndToEndTests : IClassFixture<AppFixture>
     }
 
     [Fact]
+    public async Task TerminalStateGuard_PendingEntryAlreadyDelivered_SkipsResendAndAcks()
+    {
+        // Exercises the actual guard code path: a stream entry is pending (never ACKed)
+        // but status already shows Delivered (simulating crash-after-send-before-ACK).
+        // The guard must prevent the sender from being invoked and must ACK the entry.
+        await _app.FlushRedisAsync();
+
+        var response = await PostNotificationAsync(new
+        {
+            channel = "email",
+            recipient = "guard-reclaim@example.com",
+            body = "terminal guard reclaim test"
+        });
+        var jobId = await GetJobIdAsync(response);
+
+        // Directly mark status Delivered without letting a worker ACK the stream entry.
+        // This mirrors: worker sent successfully, crashed before StreamAcknowledgeAsync.
+        var statusStore = new RedisStatusStore(_app.Multiplexer);
+        await statusStore.UpdateStateAsync(jobId, DeliveryState.Delivered, 1);
+
+        // Start a worker that throws if the sender is ever called.
+        // The terminal-state guard should catch Delivered status and ACK without routing.
+        var faulting = new FaultingSender();
+        var (worker, cts) = StartWorker(faulting);
+        try
+        {
+            // Give the worker enough time to consume and ACK the pending stream entry.
+            await Task.Delay(TimeSpan.FromSeconds(3));
+
+            Assert.False(faulting.WasCalled,
+                "Terminal-state guard failed: sender was invoked on a job already in Delivered state");
+
+            // Stream entry must have been ACKed — a second worker started now should also see nothing.
+            var faulting2 = new FaultingSender();
+            var (worker2, cts2) = StartWorker(faulting2);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                Assert.False(faulting2.WasCalled, "Stream entry was not ACKed by the terminal-state guard");
+            }
+            finally
+            {
+                cts2.Cancel();
+                await worker2.StopAsync(CancellationToken.None);
+            }
+        }
+        finally
+        {
+            cts.Cancel();
+            await worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task DuplicateIdempotencyKey_ReturnsSameJobId_With200()
     {
         await _app.FlushRedisAsync();

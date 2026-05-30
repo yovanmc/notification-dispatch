@@ -54,9 +54,9 @@ All configured thresholds passed:
 
 ## Observations
 
-- Service maintained stable p95 latency of ~13-14 ms across the full load test
+- API enqueue endpoint maintained stable p95 latency of ~13-14 ms across the full load test
 - Zero errors or dropped requests with 50 concurrent virtual users
-- Docker containers handled the sustained ~243 req/s load without issues
+- The API enqueue endpoint handled the sustained ~243 req/s load without issues
 - Graceful ramp-down phase executed cleanly
 
 ## To Rerun Locally

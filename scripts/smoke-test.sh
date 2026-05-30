@@ -65,5 +65,36 @@ else
     exit 1
 fi
 
+# 5. Webhook failure → DLQ
+echo
+echo "5. Webhook failure → DLQ..."
+WEBHOOK_KEY=$(uuidgen 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())")
+# Port 9999 is not bound in the worker container, so connection is refused immediately.
+# Three retries fail fast (~3s total), then the job is dead-lettered.
+WEBHOOK_RESP=$(curl -sf -X POST "$API/notifications" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $WEBHOOK_KEY" \
+  -d '{"channel":"webhook","recipient":"http://localhost:9999/fail","body":"{\"event\":\"smoke-test\"}"}')
+WEBHOOK_JOB=$(echo "$WEBHOOK_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobId'])")
+echo "  ✓ Webhook job $WEBHOOK_JOB submitted"
+poll_state "$WEBHOOK_JOB" "DeadLettered"
+
+# 6. DLQ replay → new queued job
+echo
+echo "6. DLQ replay..."
+REPLAY_RESP=$(curl -sf -X POST "$API/notifications/dlq/$WEBHOOK_JOB/replay")
+NEW_JOB=$(echo "$REPLAY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['newJobId'])")
+if [ "$NEW_JOB" = "$WEBHOOK_JOB" ]; then
+    echo "  ✗ Replay returned the same jobId (expected a new job)"
+    exit 1
+fi
+NEW_STATE=$(curl -sf "$API/notifications/$NEW_JOB" | python3 -c "import sys,json; print(json.load(sys.stdin)['state'])")
+if [ "$NEW_STATE" = "Queued" ] || [ "$NEW_STATE" = "Processing" ] || [ "$NEW_STATE" = "DeadLettered" ]; then
+    echo "  ✓ Replayed as $NEW_JOB (state: $NEW_STATE)"
+else
+    echo "  ✗ Unexpected replay state: $NEW_STATE"
+    exit 1
+fi
+
 echo
 echo "=== Smoke test PASSED ==="

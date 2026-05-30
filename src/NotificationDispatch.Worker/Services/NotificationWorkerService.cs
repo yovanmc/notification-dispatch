@@ -252,7 +252,10 @@ public class NotificationWorkerService : BackgroundService
             }
         }
 
-        // All retries exhausted — dead-letter
+        // All retries exhausted — dead-letter.
+        // These three writes are not atomic: if the worker crashes between DLQ write and ACK,
+        // XAUTOCLAIM will reclaim the entry and dead-letter it again (at-least-once DLQ semantics).
+        // Duplicate DLQ records for the same job are therefore possible under crash windows.
         await _dlq.WriteAsync(job, _retryPolicy.MaxAttempts, lastError!,
             firstFailureTime!.Value, DateTimeOffset.UtcNow);
         await _statusStore.UpdateStateAsync(

@@ -11,10 +11,10 @@ using Testcontainers.Redis;
 namespace NotificationDispatch.Integration;
 
 /// <summary>
-/// Validates the production worker DI wiring (mirrors Worker/Program.cs registration exactly).
-/// Proves that the host graph resolves, the hosted service starts, and IHttpClientFactory is
-/// correctly wired for WebhookSender — none of which are exercised by EndToEndTests, which
-/// construct services manually.
+/// Validates the shape of the worker DI graph: proves that the host resolves all singletons,
+/// IHttpClientFactory is wired for WebhookSender, and NotificationWorkerService starts without
+/// error. Registers services in the same order as Worker/Program.cs; the Docker Compose smoke
+/// test exercises the real container entrypoint for full production coverage.
 /// </summary>
 public class WorkerHostStartupTests : IAsyncLifetime
 {
@@ -62,14 +62,21 @@ public class WorkerHostStartupTests : IAsyncLifetime
 
         var host = builder.Build();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            // StartAsync resolves the full DI graph and starts NotificationWorkerService.
+            await host.StartAsync(cts.Token);
 
-        // StartAsync resolves the full DI graph and starts NotificationWorkerService.
-        await host.StartAsync(cts.Token);
+            // Brief pause to confirm the worker polling loop is running.
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
 
-        // Brief pause to confirm the worker polling loop is running.
-        await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
-
-        // StopAsync triggers graceful shutdown via the cancellation token passed to ExecuteAsync.
-        await host.StopAsync(CancellationToken.None);
+            // StopAsync triggers graceful shutdown via the cancellation token passed to ExecuteAsync.
+            await host.StopAsync(CancellationToken.None);
+        }
+        finally
+        {
+            // Dispose releases singletons (Redis multiplexer, HttpClient, etc.).
+            host.Dispose();
+        }
     }
 }
