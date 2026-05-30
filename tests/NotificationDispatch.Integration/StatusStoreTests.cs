@@ -84,4 +84,21 @@ public class StatusStoreTests : IClassFixture<RedisFixture>
         Assert.Equal("Connection refused", result.LastError);
         Assert.NotNull(result.CompletedAt);
     }
+
+    [Fact]
+    public async Task UpdateStateAsync_WhenStatusMissing_UpsertsMissingRecord()
+    {
+        // Simulate the case where the status record expired but the stream entry still exists:
+        // the worker calls UpdateStateAsync on a jobId with no prior status record.
+        var jobId = Guid.NewGuid().ToString();
+
+        // Do NOT call SetAsync first — status is intentionally absent
+        await _store.UpdateStateAsync(jobId, DeliveryState.Delivered, 1);
+
+        var result = await _store.GetAsync(jobId);
+        Assert.NotNull(result);
+        Assert.Equal(DeliveryState.Delivered, result.State);
+        Assert.Equal(1, result.Attempts);
+        Assert.NotNull(result.CompletedAt);
+    }
 }

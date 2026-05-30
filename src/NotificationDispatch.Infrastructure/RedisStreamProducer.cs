@@ -13,7 +13,7 @@ public class RedisStreamProducer
     private const string StreamKey = RedisConstants.JobStreamKey;
     private const string ConsumerGroup = RedisConstants.ConsumerGroupName;
     private const int IdempotencyTtlSeconds = 86400; // 24 hours
-    private const int StatusTtlSeconds = 86400;
+    private const int StatusTtlSeconds = 604800; // 7 days
 
     public RedisStreamProducer(IConnectionMultiplexer redis)
     {

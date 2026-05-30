@@ -8,7 +8,7 @@ namespace NotificationDispatch.Infrastructure;
 public class RedisStatusStore : IStatusStore
 {
     private readonly IConnectionMultiplexer _redis;
-    private static readonly TimeSpan Ttl = TimeSpan.FromHours(24);
+    private static readonly TimeSpan Ttl = TimeSpan.FromDays(7);
 
     public RedisStatusStore(IConnectionMultiplexer redis)
     {
@@ -37,9 +37,18 @@ public class RedisStatusStore : IStatusStore
     public async Task UpdateStateAsync(string jobId, DeliveryState state, int attempts, string? lastError = null)
     {
         var existing = await GetAsync(jobId);
-        if (existing is null) throw new InvalidOperationException($"Cannot update state for job '{jobId}': status record not found.");
 
-        var updated = existing with
+        // If the status record expired (e.g., worker was down >7 days), reconstruct a minimal
+        // record so the state transition can complete rather than throwing.
+        var status = existing ?? new NotificationStatus
+        {
+            JobId = jobId,
+            Channel = "unknown",
+            State = DeliveryState.Processing,
+            Attempts = 0
+        };
+
+        var updated = status with
         {
             State = state,
             Attempts = attempts,

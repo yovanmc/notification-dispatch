@@ -23,6 +23,8 @@ redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[4])
 redis.call('SET', KEYS[2], ARGV[3], 'EX', ARGV[5])
 
 -- Enqueue to stream
-redis.call('XADD', KEYS[3], '*', 'payload', ARGV[2])
+-- MAXLEN ~ 10000 trims the stream to approximately 10,000 entries.
+-- The '~' prefix allows Redis to trim lazily for efficiency.
+redis.call('XADD', KEYS[3], 'MAXLEN', '~', '10000', '*', 'payload', ARGV[2])
 
 return {1, ARGV[1]}

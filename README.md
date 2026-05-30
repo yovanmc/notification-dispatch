@@ -39,7 +39,7 @@ Client
          │                    │
          ▼                    ▼
 notification:status:{jobId}  notifications:dlq
-(24h TTL)                    (dead-letter stream)
+(7-day TTL)                  (dead-letter stream)
 ```
 
 **Shared models** (`NotificationDispatch.Core`): `NotificationRequest`, `NotificationJob`, `NotificationStatus`, `DeliveryState`.
@@ -160,7 +160,7 @@ Re-enqueue a dead-lettered job under a new job ID.
 
 **SSRF:** Webhook delivery accepts arbitrary `http://` or `https://` URLs. Loopback, private IP ranges, link-local, and cloud metadata endpoints (e.g. `169.254.169.254`) are reachable. **Do not expose this service publicly without an IP allowlist.** This is a local demo.
 
-**Stream retention:** The job stream has no retention policy — ACKed entries remain indefinitely. Status records expire after 24 hours. Both will be addressed in a future change.
+**Stream retention:** The job stream is trimmed to approximately 10,000 entries (`MAXLEN ~ 10000`). Status records expire after 7 days.
 
 ## Running Tests
 
