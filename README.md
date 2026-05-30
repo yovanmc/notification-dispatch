@@ -80,6 +80,17 @@ curl http://localhost:5100/notifications/<jobId>
 
 ## API Reference
 
+### GET /health
+
+Returns service health status.
+
+**Responses**
+
+- `200` — `{"status":"healthy","redis":"connected"}`
+- `503` — `{"status":"degraded","redis":"disconnected"}`
+
+---
+
 ### POST /notifications
 
 Submit a notification job.
@@ -173,6 +184,16 @@ dotnet test
 ```
 
 This runs all unit and integration tests.
+
+### Smoke test
+
+Validates the critical user journey against a running stack:
+
+```bash
+docker compose up -d
+./scripts/smoke-test.sh
+docker compose down
+```
 
 ## Load Testing
 

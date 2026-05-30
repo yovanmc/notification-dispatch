@@ -31,6 +31,14 @@ try
     app.UseSerilogRequestLogging();
     app.MapControllers();
 
+    app.MapGet("/health", (IConnectionMultiplexer redis) =>
+    {
+        var connected = redis.IsConnected;
+        return connected
+            ? Results.Ok(new { status = "healthy", redis = "connected" })
+            : Results.Json(new { status = "degraded", redis = "disconnected" }, statusCode: 503);
+    });
+
     app.Run();
 }
 catch (Exception ex)
