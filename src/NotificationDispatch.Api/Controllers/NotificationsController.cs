@@ -136,12 +136,23 @@ public class NotificationsController : ControllerBase
                 return UnprocessableEntity(new { error = "DLQ entry is missing payload field" });
 
             var originalJob = NotificationJob.FromJson(payloadJson);
-            var replayKey = $"replay-{jobId}-{DateTimeOffset.UtcNow.Ticks}";
+            // Deterministic replay key: replaying the same DLQ entry always returns the same new job
+            // within the idempotency TTL window (7 days). Use a fresh key to force replay after TTL.
+            var replayKey = $"replay:{jobId}";
 
-            var (_, newJobId) = await _producer.EnqueueAsync(originalJob.Request, replayKey);
-
-            _logger.LogInformation("DLQ job {OriginalJobId} replayed as {NewJobId}",
-                jobId, newJobId);
+            var (replayResult, newJobId) = await _producer.EnqueueAsync(originalJob.Request, replayKey);
+            // Conflict means the body changed — impossible here since we replay the exact original payload.
+            // Duplicate means this job was already replayed within the idempotency TTL — return the existing replay.
+            if (replayResult == EnqueueResult.Duplicate)
+            {
+                _logger.LogInformation("DLQ job {OriginalJobId} already replayed as {NewJobId} (idempotent)",
+                    jobId, newJobId);
+            }
+            else
+            {
+                _logger.LogInformation("DLQ job {OriginalJobId} replayed as {NewJobId}",
+                    jobId, newJobId);
+            }
 
             return AcceptedAtAction(nameof(GetStatus), new { id = newJobId },
                 new { originalJobId = jobId, newJobId });

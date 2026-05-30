@@ -273,6 +273,52 @@ public class EndToEndTests : IClassFixture<AppFixture>
         Assert.Equal(firstJobId, secondJobId);
     }
 
+    [Fact]
+    public async Task DlqReplay_CalledTwice_ReturnsSameNewJobId()
+    {
+        await _app.FlushRedisAsync();
+
+        // Dead-letter a webhook job
+        using var mockServer = WireMockServer.Start();
+        mockServer.Given(Request.Create().WithPath("/idem-fail").UsingPost())
+                  .RespondWith(Response.Create().WithStatusCode(500));
+
+        var response = await PostNotificationAsync(new
+        {
+            channel = "webhook",
+            recipient = $"{mockServer.Url}/idem-fail",
+            body = "replay-idempotency test"
+        });
+        var originalJobId = await GetJobIdAsync(response);
+
+        var webhookSender = new WebhookSender(new HttpClient(), NullLogger<WebhookSender>.Instance);
+        var (worker, cts) = StartWorker(webhookSender);
+        try
+        {
+            await WaitForStateAsync(originalJobId, "DeadLettered", TimeSpan.FromSeconds(25));
+        }
+        finally
+        {
+            cts.Cancel();
+            await worker.StopAsync(CancellationToken.None);
+        }
+
+        // Replay twice
+        var replay1 = await _app.ApiClient.PostAsync($"/notifications/dlq/{originalJobId}/replay", null);
+        var replay2 = await _app.ApiClient.PostAsync($"/notifications/dlq/{originalJobId}/replay", null);
+
+        Assert.Equal(HttpStatusCode.Accepted, replay1.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, replay2.StatusCode);
+
+        var body1 = await replay1.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var body2 = await replay2.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+
+        var newJobId1 = body1.GetProperty("newJobId").GetString()!;
+        var newJobId2 = body2.GetProperty("newJobId").GetString()!;
+
+        Assert.Equal(newJobId1, newJobId2); // idempotent — same replay produces same new jobId
+    }
+
     private sealed class FaultingSender : INotificationSender
     {
         public bool WasCalled { get; private set; }
