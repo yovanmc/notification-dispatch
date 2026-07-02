@@ -172,6 +172,12 @@ Replay is idempotent within a 24-hour window — calling this endpoint twice for
 | Worker crash after DLQ write, before ACK | Entry is reclaimed and dead-lettered again; **at-least-once DLQ semantics** — duplicate DLQ records are possible under crash windows |
 | Webhook target down | Retried 3 times with exponential backoff, then dead-lettered; recoverable via `/dlq/{jobId}/replay` |
 
+## How this was built
+
+This repo was designed, specified, and reviewed by me, and implemented through my multi-agent development workflow: AI subagents execute written plans, with adversarial review gates (plan critique, code review, test verification) between phases. Every architectural decision is mine, and the process is left visible in the history on purpose — including the review-fix commit cycles.
+
+The productized form of that workflow is [backend-harness](https://github.com/yovanmc/backend-harness). If you're evaluating my work: ask me why the DLQ write happens before the ACK, or what breaks because retry counts are process-local — I'll defend the design from first principles.
+
 ## Limitations
 
 **Delivery semantics:** At-least-once. A job can be sent more than once if the worker crashes after delivery but before the stream ACK. Webhook endpoints should be idempotent. Email and SMS channels are logged stubs; real SMTP/Twilio delivery would inherit the same at-least-once guarantee.
